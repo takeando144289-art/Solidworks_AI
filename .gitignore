@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+*.user
+logs/
+workspace/.python-tools/
+workspace/lifecycle-test/
+workspace/.swagent-last-output.json
+.env
+.env.*
+!.env.example
+workspace/parts/*.SLDPRT
+workspace/assemblies/*.SLDASM
+workspace/drawings/*.SLDDRW
+workspace/exports/*
+!workspace/**/.gitkeep

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>swagent</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksAgent.Core\SolidWorksAgent.Core.csproj" />
+    <ProjectReference Include="..\SolidWorksAgent.SwApi\SolidWorksAgent.SwApi.csproj" />
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
+
