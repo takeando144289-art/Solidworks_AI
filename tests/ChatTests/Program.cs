@@ -29,6 +29,10 @@ var fixture = """{"reply":"円柱を作成します。","commands":[{"command":"
 CadCommand Cylinder(params CommandArgument[] extras) => new("part create-cylinder", [new("diameter", "30"), new("length", "20"), .. extras]);
 var tests = new List<(string, Action)>
 {
+    ("Drawing can use any active model without shaft parameters", () => CommandCatalog.Validate(new("drawing create", []))),
+    ("General drawing supports assembly and large paper", () => CommandCatalog.Validate(new("drawing create", [new("model", "C:\\Parts\\assembly.SLDASM"),new("paper", "A0"),new("scale", "0.01"),new("views", "all")]))),
+    ("Drawing rejects invalid scale", () => Reject(() => CommandCatalog.Validate(new("drawing create", [new("scale", "NaN")])))),
+    ("Drawing changes require approval", () => Check(!ChatIntents.IsReadOnly(new("drawing create", [])))),
     ("Sketch mutations require inspected fingerprint", () => Reject(() => CommandCatalog.Validate(new("sketch fully-define", [new("sketch", "Sketch1")])))),
     ("Sketch inspections alone are read-only", () => Check(ChatIntents.IsReadOnly(new("sketch inspect", [])) && !ChatIntents.IsReadOnly(new("sketch fully-define", [])))),
     ("Fix is not a substitute for dimensions", () => Reject(() => CommandCatalog.Validate(new("sketch add-relation", [new("sketch", "Sketch1"), new("kind", "fixed"), new("entities", "s:0:1"), new("expected", new string('A',64))])))),

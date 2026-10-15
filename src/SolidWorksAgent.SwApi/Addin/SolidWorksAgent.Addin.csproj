@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>SolidWorksAgent.ChatAddin.V3</AssemblyName>
+    <AssemblyName>SolidWorksAgent.ChatAddin.V4</AssemblyName>
     <EnableComHosting>true</EnableComHosting>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

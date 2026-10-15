@@ -1,9 +1,15 @@
 using SolidWorksAgent.Core.Design;
+using SolidWorksAgent.Core.Drawing;
 using SolidWorksAgent.Core.Models;
 using SolidWorksAgent.Core.Validation;
 
 var tests = new (string Name, Action Test)[]
 {
+    ("Drawing layout supports arbitrary stage sizes", () => CheckDrawingLayout([new(30,20),new(30,30),new(20,30),new(40,35)])),
+    ("Drawing layout scales large models onto one sheet", () => CheckDrawingLayout([new(25000,3000),new(25000,5000),new(3000,5000),new(28000,6000)])),
+    ("Drawing layout places all seven views", () => CheckDrawingLayout(Enumerable.Repeat(new DrawingLayout.Size(200,150),7).ToArray())),
+    ("Drawing layout rejects impossible explicit scale", () => MustThrow<ArgumentException>(() => DrawingLayout.Fit([new(1000,1000)],"A4",1))),
+    ("Drawing layout rejects non-finite size", () => MustThrow<ArgumentException>(() => DrawingLayout.Fit([new(double.NaN,20)]))),
     ("Cleanup preserves a dirty final output",()=>CheckCleanup(false,true,true,false,false,false,true,true)),
     ("Cleanup discards an owned unsaved intermediate",()=>CheckCleanup(true,false,true,false,false,false,true,true)),
     ("Cleanup discards owned intermediates on failure",()=>CheckCleanup(true,false,true,false,false,false,true,false)),
@@ -51,4 +57,16 @@ static void MustThrow<T>(Action action) where T : Exception
 static void CheckCleanup(bool expected,bool final,bool owned,bool existed,bool previous,bool dirtyBefore,bool dirtyNow,bool succeeded)
 {
     if(DocumentCleanupPolicy.ShouldClose(final,owned,existed,previous,dirtyBefore,dirtyNow,succeeded)!=expected)throw new Exception("Incorrect document cleanup decision.");
+}
+
+static void CheckDrawingLayout(DrawingLayout.Size[] sizes)
+{
+    var plan=DrawingLayout.Fit(sizes);
+    if(plan.Cells.Length!=sizes.Length || plan.Scale<=0) throw new Exception("Invalid layout");
+    for(int i=0;i<sizes.Length;i++)
+    {
+        var c=plan.Cells[i];var s=sizes[i];
+        if(s.WidthMm*plan.Scale>c.WidthMm-44+.001 || s.HeightMm*plan.Scale>c.HeightMm-36+.001) throw new Exception("View does not fit its cell");
+        if(c.Xmm-c.WidthMm/2<0 || c.Ymm-c.HeightMm/2<0 || c.Xmm+c.WidthMm/2>plan.WidthMm || c.Ymm+c.HeightMm/2>plan.HeightMm) throw new Exception("View outside sheet");
+    }
 }

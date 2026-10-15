@@ -253,7 +253,7 @@ public sealed class ChatPanel : UserControl
         "info" => "接続の確認", "documents list" => "開いているドキュメントの確認", "part inspect" => "部品形状の確認",
         "part create-cylinder" => "円柱を作成", "part create-shaft" => "段付きシャフトを作成", "part create-tube" => "パイプを作成",
         "assembly create-bearing-test" => "軸受アセンブリを作成", "assembly analyze" => "アセンブリの干渉を確認",
-        "drawing create-shaft" => "シャフトの図面を作成", "drawing inspect" => "図面の確認", "view isometric" => "等角表示に変更", _ => command
+        "drawing create" => "部品・アセンブリの図面を作成", "drawing inspect" => "図面の確認", "view isometric" => "等角表示に変更", _ => command
     };
     private static string ArgumentName(string name) => name switch
     {

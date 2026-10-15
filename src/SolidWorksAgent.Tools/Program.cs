@@ -81,6 +81,7 @@ static int Run(string[] args)
                 => new AssemblyInspector(connection).AnalyzeActiveAssembly(),
             "view" when args.Length > 1 && args[1].Equals("isometric", StringComparison.OrdinalIgnoreCase)
                 => SetIsometricView(connection),
+            "drawing" when args.Length > 1 && args[1] == "create" => CreateGeneralDrawing(connection, options, parsed),
             "drawing" when args.Length > 1 && args[1].Equals("create-shaft", StringComparison.OrdinalIgnoreCase)
                 => CreateShaftDrawing(connection, log, options, parsed),
             "drawing" when args.Length > 1 && args[1].Equals("inspect", StringComparison.OrdinalIgnoreCase)
@@ -99,7 +100,7 @@ static int Run(string[] args)
         };
 
         if(documents!=null) {
-            bool creates=args.Length>1&&(args[1].StartsWith("create-",StringComparison.OrdinalIgnoreCase)||args[1] is "prepare-sheet-metal" or "dimension-sheet-metal" or "aux-sheet-metal" or "open-final");
+            bool creates=args.Length>1&&(args[1].StartsWith("create-",StringComparison.OrdinalIgnoreCase)||args[1] is "create" or "prepare-sheet-metal" or "dimension-sheet-metal" or "aux-sheet-metal" or "open-final");
             var value=JsonSerializer.SerializeToElement(result);
             var finals=creates?new[]{"Drawing","DrawingPath","Path"}.Where(key=>value.TryGetProperty(key,out var p)&&p.ValueKind==JsonValueKind.String).Select(key=>value.GetProperty(key).GetString()!).Where(path=>new[]{".SLDPRT",".SLDASM",".SLDDRW"}.Contains(Path.GetExtension(path).ToUpperInvariant())).Take(1).ToArray():[];
             var cleanup=documents.Complete(finals,saveGeneratedChanges:creates&&args[1]!="open-final");
@@ -196,6 +197,18 @@ static object SetIsometricView(SwConnection connection)
     return new { view = "Isometric", zoomToFit = true };
 }
 
+static object CreateGeneralDrawing(SwConnection connection, AgentOptions options, Arguments args)
+{
+    var name = args.Value("--output") ?? "Drawing_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDDRW";
+    var drawing = Path.IsPathRooted(name) ? name : Path.Combine(options.WorkspaceRoot, "drawings", name);
+    var pdfName = args.Value("--pdf") ?? Path.ChangeExtension(Path.GetFileName(name), ".pdf");
+    var pdf = Path.IsPathRooted(pdfName) ? pdfName : Path.Combine(options.WorkspaceRoot, "exports", pdfName);
+    return new GeneralDrawingBuilder(connection).Create(args.Value("--model"), drawing, pdf,
+        args.Value("--template") ?? options.DrawingTemplate ?? throw new FileNotFoundException("Drawing template missing"),
+        args.Value("--paper") ?? "auto", args.Has("--scale") ? args.RequiredDouble("--scale") : null,
+        args.Value("--views") ?? "standard", args.Value("--dimensions") ?? "auto", args.Has("--overwrite"));
+}
+
 static object CreateShaftDrawing(SwConnection connection, IAgentLog log, AgentOptions options, Arguments args)
 {
     var model = Path.GetFullPath(args.Value("--model") ?? throw new ArgumentException("Missing required option: --model"));
@@ -236,8 +249,8 @@ Usage:
   swagent sketch add-dimension --sketch <name> --kind <length|distance|horizontal|vertical|diameter|radius> --entities <ids> [--value <mm>] [--json]
   swagent sketch add-relation --sketch <name> --kind <horizontal|vertical|coincident|concentric|parallel|perpendicular|tangent|equal|midpoint|collinear> --entities <ids> [--json]
   swagent chat check-connection [--solidworks-pid <pid>] [--json]
-  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V3.comhost.dll> [--json]
-  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V3.comhost.dll> [--json]
+  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V4.comhost.dll> [--json]
+  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V4.comhost.dll> [--json]
   swagent info [--json]
   swagent part create-cylinder --diameter <mm> --length <mm>
       [--output <name.SLDPRT>] [--template <file.prtdot>] [--overwrite]
@@ -256,6 +269,8 @@ Usage:
   swagent assembly analyze [--json]
   swagent view isometric [--json]
   swagent view snapshot [--output <image.bmp>] [--json]
+  swagent drawing create [--model <part.SLDPRT|assembly.SLDASM>] [--paper auto|A4|A3|A2|A1|A0]
+      [--scale <ratio>] [--views standard|all] [--dimensions auto|model|none] [--output <drawing.SLDDRW>] [--pdf <drawing.pdf>] [--overwrite] [--json]
   swagent drawing create-shaft --model <shaft.SLDPRT>
       [--length <expected mm>] [--diameter <expected max mm>]
       [--tolerance <explicit symmetric mm>] [--output <drawing.SLDDRW>]

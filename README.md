@@ -66,6 +66,26 @@ Codexの隔離環境から通常実行するとWindowsユーザーごとのCOM�
 
 テンプレートを自動検出できない場合は `--template C:\path\to\部品.PRTDOT` を指定してください。
 
+## General part and assembly drawings
+
+```powershell
+# Active part/assembly, one sheet, automatic paper and scale, drawing + PDF
+dotnet run --project src/SolidWorksAgent.Tools -- drawing create --json
+# Explicit model, all six orthographic directions plus isometric
+dotnet run --project src/SolidWorksAgent.Tools -- drawing create `
+  --model workspace/parts/Part.SLDPRT --views all --paper A3 --scale 0.5 `
+  --output Part.SLDDRW --pdf Part.pdf --json
+```
+
+No shaft-stage, length or diameter caps. The chat uses this general command.
+Detectable visible outer/circular/shaft-shoulder dimensions are added to parts;
+assemblies import model dimensions. `--dimensions model` explicitly imports design/sketch
+dimensions (dense models may need layout review); `none` creates views only.
+Unsaved source edits are preserved using a separate drawing-reference copy.
+Keep the reference model files with the drawing. Section/detail views, GD&T and
+manufacturing tolerances still require explicit design work; the output reports its
+coverage rather than claiming manufacturing completeness.
+
 ## Associative shaft drawings
 
 The current `drawing create-shaft` derives dimensions from the existing model;

@@ -91,10 +91,24 @@ Vendor CLIs may retain their own logs according to their settings.
 - Inspect active document / open document list / part geometry / drawing dimensions.
 - Create cylinders, stepped shafts and tubes.
 - Build the existing housing/bearing/shaft assembly; analyze assembly interference.
-- Create the existing associative shaft drawing and PDF, or set isometric view.
+- Create associative part/assembly drawings and PDFs with automatic paper/scale, or set isometric view.
 
-The shaft drawing planner retains its existing restrictions: plain three-stage,
-coaxial solid shafts within 40 mm length and 20 mm diameter, one A4 sheet.
+`drawing create` uses the actual model without shaft-stage, diameter or length limits.
+The default is one sheet with front/top/right/isometric views; `views=all` adds
+back/left/bottom views. Paper A4–A0 and scale are selected automatically or can be
+specified. `dimensions=auto` adds detectable visible outer, circular and shaft-shoulder
+measurements on parts; assemblies import model dimensions.
+`dimensions=model` imports model dimensions (construction dimensions can be dense and
+require layout review), and `none` produces views only.
+Native drawing dimensions are checked again after saving/reopening, before PDF export.
+Dirty or unsaved source models are copied to a unique drawing reference file, preserving
+the user's source and unsaved edits. Keep that reference file alongside the drawing.
+
+This creates a general drawing, not a guarantee of a complete manufacturing specification.
+Automatic section/detail views, GD&T, fits and design-specific tolerance selection are not
+implemented by this command. Those requirements must be specified and completed explicitly.
+The older specialized `drawing create-shaft` CLI remains for compatibility and is no longer
+exposed to the chat.
 The chat does not yet expose the experimental sheet-metal, knee-linkage, or
 document-discard CLI commands. Unsupported requests are answered or clarified.
 
@@ -146,7 +160,7 @@ Windows subprocess argument/UTF-8 round trips, cancellation, output bounds and
 all three provider adapters using local fixture processes. These tests do not
 contact paid AI services and do not prove real-account authentication.
 
-Standalone UI preview: run `SolidWorksAgent.ChatUi.V3.exe` from the addin package.
+Standalone UI preview: run `SolidWorksAgent.ChatUi.V4.exe` from the addin package.
 It displays the actual control without attaching to CAD. The `--smoke-test <png>`
 option renders the UI and exits for visual verification.
 Runtime add-in errors: `%LOCALAPPDATA%\SolidWorksAgent\addin.log`.
@@ -237,3 +251,12 @@ and verifies restored geometry; it never blindly undoes a previous user operatio
 
 API references: [FullyDefineSketch](https://help.solidworks.com/2015/english/api/sldworksapi/SOLIDWORKS.Interop.sldworks~SOLIDWORKS.Interop.sldworks.ISketchManager~FullyDefineSketch.html),
 [SetCoords](https://help.solidworks.com/2018/English/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISketchPoint~SetCoords.html).
+
+## General drawing update (V4)
+
+V4 replaces the restricted shaft-only chat command with `drawing create`. The new
+managed/COM identity permits loading the update into the running SOLIDWORKS session.
+Windows CLI authentication and WSL configuration are unchanged.
+
+Validation: two-stage 30 mm shaft, imported curved/sheet-metal part with seven views,
+and an assembly; native drawings and PDFs reopened/checked in SOLIDWORKS.
