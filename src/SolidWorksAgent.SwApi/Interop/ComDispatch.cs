@@ -43,7 +43,7 @@ internal static class ComDispatch
                 try
                 {
                     moniker.GetDisplayName(bindContext, null, out var displayName);
-                    if (displayName.Contains($"SolidWorks_PID_{processId}", StringComparison.OrdinalIgnoreCase))
+                    if (displayName.EndsWith($"SolidWorks_PID_{processId}", StringComparison.OrdinalIgnoreCase))
                     {
                         table.GetObject(moniker, out var application);
                         return application;
@@ -93,8 +93,8 @@ internal static class ComDispatch
         }
     }
 
-    public static object? Get(object target, string name) =>
-        target.GetType().InvokeMember(name, BindingFlags.GetProperty, null, target, null);
+    public static object? Get(object target, string name, params object?[] indexes) =>
+        target.GetType().InvokeMember(name, BindingFlags.GetProperty, null, target, indexes);
 
     public static void Set(object target, string name, object? value) =>
         target.GetType().InvokeMember(name, BindingFlags.SetProperty, null, target, [value]);

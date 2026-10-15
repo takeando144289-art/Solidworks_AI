@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <Compile Remove="Addin\**\*.cs" />
+    <EmbeddedResource Remove="Addin\**\*" />
+    <None Remove="Addin\**\*" />
     <ProjectReference Include="..\SolidWorksAgent.Core\SolidWorksAgent.Core.csproj" />
   </ItemGroup>
 </Project>

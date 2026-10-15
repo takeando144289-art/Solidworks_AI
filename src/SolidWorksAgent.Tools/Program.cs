@@ -14,6 +14,12 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args) => Run(args);
 
+static string? SketchOutput(Arguments parsed, AgentOptions options)
+{
+    var value = parsed.Value("--output");
+    return value is null ? null : Path.IsPathRooted(value) ? value : Path.Combine(options.WorkspaceRoot, "parts", value);
+}
+
 static int Run(string[] args)
 {
     var json = args.Contains("--json", StringComparer.OrdinalIgnoreCase);
@@ -32,13 +38,28 @@ static int Run(string[] args)
         using var connection = new SwConnection(log);
         if (parsed.Has("--start"))
             throw new ArgumentException("Automatic startup is disabled because this SolidWorks installation requires interactive authentication. Start and authenticate SolidWorks manually, then run the command without --start.");
-        connection.ConnectToRunningSolidWorks();
+        int? processId = null;
+        if (parsed.Has("--solidworks-pid"))
+        {
+            if (!int.TryParse(parsed.Value("--solidworks-pid"), out var requestedPid) || requestedPid <= 0)
+                throw new ArgumentException("--solidworks-pid requires a positive process ID.");
+            processId = requestedPid;
+        }
+        connection.ConnectToRunningSolidWorks(processId);
         bool managed=args[0] is "part" or "assembly" or "drawing" || (args[0]=="documents"&&args.Length>1&&args[1]=="open-final");
         using var documents=managed?connection.BeginDocumentSession(options.WorkspaceRoot):null;
 
         object result = args[0].ToLowerInvariant() switch
         {
             "connect" => new { connected = true },
+            "chat" when args.Length > 1 && args[1] == "load-addin" => connection.LoadChatAddin(parsed.Value("--path") ?? throw new ArgumentException("--path is required")),
+            "chat" when args.Length > 1 && args[1] == "unload-addin" => connection.UnloadChatAddin(parsed.Value("--path") ?? throw new ArgumentException("--path is required")),
+            "chat" when args.Length > 1 && args[1] == "check-connection" => connection.CheckChatConnection(),
+            "sketch" when args.Length > 1 && args[1] == "verify" => new SketchEditor(connection).Verify(options.PartTemplate ?? throw new FileNotFoundException("Part template missing"), parsed.Value("--output") ?? throw new ArgumentException("--output is required")),
+            "sketch" when args.Length > 1 && args[1] is "list" or "inspect" => new SketchEditor(connection).Inspect(parsed.Value("--sketch")),
+            "sketch" when args.Length > 1 && args[1] == "fully-define" => new SketchEditor(connection).FullyDefine(parsed.Value("--sketch") ?? throw new ArgumentException("--sketch is required"), parsed.Value("--expected"), SketchOutput(parsed, options), parsed.Has("--overwrite")),
+            "sketch" when args.Length > 1 && args[1] == "add-dimension" => new SketchEditor(connection).AddDimension(parsed.Value("--sketch") ?? throw new ArgumentException("--sketch is required"), parsed.Value("--kind") ?? throw new ArgumentException("--kind is required"), parsed.Value("--entities") ?? throw new ArgumentException("--entities is required"), parsed.Has("--value") ? parsed.RequiredDouble("--value") : null, parsed.Value("--expected"), SketchOutput(parsed, options), parsed.Has("--overwrite")),
+            "sketch" when args.Length > 1 && args[1] == "add-relation" => new SketchEditor(connection).AddRelation(parsed.Value("--sketch") ?? throw new ArgumentException("--sketch is required"), parsed.Value("--kind") ?? throw new ArgumentException("--kind is required"), parsed.Value("--entities") ?? throw new ArgumentException("--entities is required"), parsed.Value("--expected"), SketchOutput(parsed, options), parsed.Has("--overwrite")),
             "info" => connection.GetActiveDocument(),
             "documents" when args.Length > 1 && args[1].Equals("list", StringComparison.OrdinalIgnoreCase) => connection.ListOpenDocuments(),
             "documents" when args.Length > 1 && args[1].Equals("close", StringComparison.OrdinalIgnoreCase) => CloseNamedDocument(connection,parsed),
@@ -208,7 +229,15 @@ static void PrintHelp() => Console.WriteLine("""
 SolidWorks AI Agent CLI
 
 Usage:
+  All CAD commands accept --solidworks-pid <pid> to target a specific running instance.
   swagent connect [--json]
+  swagent sketch list|inspect [--sketch <name>] [--json]
+  swagent sketch fully-define --sketch <name> [--expected <fingerprint>] [--output <new.SLDPRT>] [--overwrite] [--json]
+  swagent sketch add-dimension --sketch <name> --kind <length|distance|horizontal|vertical|diameter|radius> --entities <ids> [--value <mm>] [--json]
+  swagent sketch add-relation --sketch <name> --kind <horizontal|vertical|coincident|concentric|parallel|perpendicular|tangent|equal|midpoint|collinear> --entities <ids> [--json]
+  swagent chat check-connection [--solidworks-pid <pid>] [--json]
+  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V3.comhost.dll> [--json]
+  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V3.comhost.dll> [--json]
   swagent info [--json]
   swagent part create-cylinder --diameter <mm> --length <mm>
       [--output <name.SLDPRT>] [--template <file.prtdot>] [--overwrite]

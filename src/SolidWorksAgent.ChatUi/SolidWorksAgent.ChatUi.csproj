@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>SolidWorksAgent.ChatUi.V3</AssemblyName>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksAgent.Chat\SolidWorksAgent.Chat.csproj" />
+  </ItemGroup>
+</Project>

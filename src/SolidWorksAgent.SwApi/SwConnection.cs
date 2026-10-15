@@ -16,9 +16,21 @@ public sealed partial class SwConnection : IDisposable
     public bool IsConnected => _application is not null;
     internal object Application => _application ?? throw new InvalidOperationException("Not connected to SolidWorks.");
 
-    public void ConnectToRunningSolidWorks()
+    public void ConnectToRunningSolidWorks(int? processId = null)
     {
         if (IsConnected) return;
+        if (processId is int target)
+        {
+            if (target <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+            _application = ComDispatch.GetRunningApplication(target);
+            if (Convert.ToInt32(ComDispatch.Call(_application, "GetProcessID")) != target)
+            {
+                ComDispatch.Release(_application); _application = null;
+                throw new InvalidOperationException("The connected SolidWorks process does not match the requested PID.");
+            }
+            _log.Write("CAD", $"Connected to requested SolidWorks PID {target}.");
+            return;
+        }
         try
         {
             _application = ComDispatch.GetRunningApplication();

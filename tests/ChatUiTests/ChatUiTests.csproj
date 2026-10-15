@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><UseWindowsForms>true</UseWindowsForms></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/SolidWorksAgent.ChatUi/SolidWorksAgent.ChatUi.csproj" /></ItemGroup>
+</Project>

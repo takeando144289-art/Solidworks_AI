@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>SolidWorksAgent.Chat.V3</AssemblyName>
+    <TargetFramework>net8.0-windows</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksAgent.Core\SolidWorksAgent.Core.csproj" />
+  </ItemGroup>
+</Project>

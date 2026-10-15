@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>SolidWorksAgent.ChatAddin.V3</AssemblyName>
+    <EnableComHosting>true</EnableComHosting>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SolidWorksInteropDirectory Condition="'$(SolidWorksInteropDirectory)' == ''">$(ProgramFiles)\Dassault Systemes\SOLIDWORKS 3DEXPERIENCE R2026x\SOLIDWORKS\api\redist</SolidWorksInteropDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\SolidWorksAgent.ChatUi\SolidWorksAgent.ChatUi.csproj" />
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksInteropDirectory)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksInteropDirectory)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Compile Include="..\Interop\ComDispatch.cs" Link="Interop\ComDispatch.cs" />
+  </ItemGroup>
+  <Target Name="CheckSolidWorksSdk" BeforeTargets="ResolveReferences" Condition="!Exists('$(SolidWorksInteropDirectory)\SolidWorks.Interop.swpublished.dll')">
+    <Error Text="Set SolidWorksInteropDirectory to the installed SOLIDWORKS api\redist folder (see scripts/Build-ChatAddin.ps1)." />
+  </Target>
+</Project>

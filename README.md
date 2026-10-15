@@ -1,5 +1,13 @@
 # SolidWorks AI Agent
 
+## SolidWorks内のAIチャット（Windows）
+
+Codex・Claude・Geminiを選べるタスクペインアドインを追加しています。
+既存CLIの部品・アセンブリ・図面操作を再利用し、日本語の指示から操作案を作成して実行できます。
+Windows版の各AI CLIと認証を利用します。ビルド、登録、設定、対応範囲は
+[チャットアドインの導入手順](docs/chat-addin.md)を参照してください。
+既存の2Dスケッチに駆動寸法と幾何拘束を追加できます。「形状を変えずに完全定義して」と指示し、確認後に「実行して」と返信してください。変更は既定で未保存です。
+
 SolidWorksをAIから安全に操作するための、Windows/.NET 8向けCLI基盤です。現在は実装計画のMilestone 1〜5までを対象に、COM接続、Part生成・解析、Assembly構築・Mate・干渉解析、図面・断面図・寸法公差・PDF生成まで実装しています。
 
 ## Build and test
