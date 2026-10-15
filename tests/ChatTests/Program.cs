@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using SolidWorksAgent.Chat;
 
+if (args.FirstOrDefault() == "app-server") return await NativeSessionChecks.FixtureServer();
+if (args.FirstOrDefault() == "--native-live") return await NativeSessionChecks.Live(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "--echo")
 {
     Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -29,13 +31,13 @@ var fixture = """{"reply":"円柱を作成します。","commands":[{"command":"
 CadCommand Cylinder(params CommandArgument[] extras) => new("part create-cylinder", [new("diameter", "30"), new("length", "20"), .. extras]);
 var tests = new List<(string, Action)>
 {
-    ("API method names do not bypass change approval", () => Check(!ChatIntents.IsReadOnly(new("api execute",[])))),
+    ("API method names do not make execution read-only", () => Check(!ChatIntents.IsReadOnly(new("api execute",[])))),
     ("API metadata discovery is read-only", () => Check(ChatIntents.IsReadOnly(new("api describe",[new("interface","IFeatureManager")])))),
     ("Plate accepts explicit thread positions", () => CommandCatalog.Validate(new("part create-plate",[new("width","150"),new("height","20"),new("thickness","3"),new("radius","5"),new("holes","[[10,10],[20,10]]"),new("thread","M3x0.5")]))),
     ("Drawing can use any active model without shaft parameters", () => CommandCatalog.Validate(new("drawing create", []))),
     ("General drawing supports assembly and large paper", () => CommandCatalog.Validate(new("drawing create", [new("model", "C:\\Parts\\assembly.SLDASM"),new("paper", "A0"),new("scale", "0.01"),new("views", "all")]))),
     ("Drawing rejects invalid scale", () => Reject(() => CommandCatalog.Validate(new("drawing create", [new("scale", "NaN")])))),
-    ("Drawing changes require approval", () => Check(!ChatIntents.IsReadOnly(new("drawing create", [])))),
+    ("Drawing creation is a mutation", () => Check(!ChatIntents.IsReadOnly(new("drawing create", [])))),
     ("Sketch mutations require inspected fingerprint", () => Reject(() => CommandCatalog.Validate(new("sketch fully-define", [new("sketch", "Sketch1")])))),
     ("Sketch inspections alone are read-only", () => Check(ChatIntents.IsReadOnly(new("sketch inspect", [])) && !ChatIntents.IsReadOnly(new("sketch fully-define", [])))),
     ("Fix is not a substitute for dimensions", () => Reject(() => CommandCatalog.Validate(new("sketch add-relation", [new("sketch", "Sketch1"), new("kind", "fixed"), new("entities", "s:0:1"), new("expected", new string('A',64))])))),
@@ -45,7 +47,7 @@ var tests = new List<(string, Action)>
     ("Revised request never approves old plan", () => Check(ChatIntents.Parse("直径を20mmに変えて実行して") == ChatIntent.Message)),
     ("Overwrite requires explicit complete instruction", () => Check(ChatIntents.Parse("上書きを許可して実行") == ChatIntent.ExecuteWithOverwrite && ChatIntents.Parse("上書きは許可しないで実行して") == ChatIntent.Message)),
     ("Cancellation recognized", () => Check(ChatIntents.Parse("やめて") == ChatIntent.Cancel)),
-    ("Only inspections run automatically", () => Check(ChatIntents.IsReadOnly(new("info", [])) && !ChatIntents.IsReadOnly(Cylinder()) && !ChatIntents.IsReadOnly(new("view isometric", [])))),
+    ("Inspectors are distinguished from mutations", () => Check(ChatIntents.IsReadOnly(new("info", [])) && !ChatIntents.IsReadOnly(Cylinder()) && !ChatIntents.IsReadOnly(new("view isometric", [])))),
     ("Valid plan and Unicode", () => Check(ChatProtocol.Parse(fixture).Commands.Length == 1)),
     ("Markdown JSON accepted", () => Check(ChatProtocol.Parse("```json\n" + fixture + "\n```").Commands.Length == 1)),
     ("Truncated response rejected", () => Reject(() => ChatProtocol.Parse(fixture[..^2]))),
@@ -122,6 +124,7 @@ foreach (var provider in Enum.GetValues<AiProvider>())
     catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + provider + ": " + ex.Message); }
 }
 Console.WriteLine($"{tests.Count + 6 - failed}/{tests.Count + 6} checks passed");
+failed += await NativeSessionChecks.Run();
 return failed == 0 ? 0 : 1;
 
 static void Check(bool value) { if (!value) throw new Exception("Assertion failed"); }

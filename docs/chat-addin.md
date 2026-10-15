@@ -1,10 +1,10 @@
 # SolidWorks AI Chat (Windows)
 
-Windows x64 SOLIDWORKS task-pane add-in. Choose **Codex / Claude / Gemini**,
-enter a request, review proposed changes in the conversation, and reply **実行して**.
-Read-only inspections run automatically and report their results in the conversation.
-Reply **やめて** to cancel a proposal or stop after the current CAD operation.
-The existing `swagent.exe` performs CAD work. No WSL component is used at runtime.
+Windows x64 SOLIDWORKS task-pane front end for the native **Codex / Claude / Gemini** agents.
+The pane forwards the user's text and displays the agent's streamed response. It does
+not interpret JSON operation proposals, require an extra “execute” message, or run a
+custom planning/retry loop. The vendor agent owns tool use, recovery and completion.
+No WSL component is used at runtime and no WSL setting is changed.
 
 ## Build
 
@@ -76,15 +76,15 @@ Open **⋯ > 接続設定…** to set:
   Standard npm `.cmd` shims resolve to known JavaScript entry points without a shell.
 - Node.js: `node.exe` or its full path when using npm-installed CLIs.
 
-Per-provider model names are editable under **⋯ > モデル…**. Empty means the CLI
-default; availability depends on the authenticated account. Conversation context
-and execution results are retained when switching providers, but vendor-native
-conversation sessions are not shared. The last 24 messages are sent as context.
-**⋯ > 新しい会話** clears the in-memory history. Conversations are not persisted by this UI.
-Settings are stored in `%LOCALAPPDATA%\SolidWorksAgent\chat-settings.json`.
-The model sees conversation text, the active document's title/path/type and
-the JSON results of operations you execute. It is not sent entire CAD files by this app.
-Vendor CLIs may retain their own logs according to their settings.
+Per-provider model names are editable under **⋯ > モデル…**. Empty uses the vendor default.
+Codex uses a persistent app-server thread while the pane is open. Claude/Gemini use
+native CLI session IDs for subsequent messages. Switching providers keeps their sessions
+separate; the UI transcript is shared visually but another provider does not inherit a
+private vendor session. **⋯ > 新しい会話** starts fresh sessions. Closing SOLIDWORKS
+ends the pane connection; automatic transcript restoration after restart is not implemented.
+Settings remain in `%LOCALAPPDATA%\SolidWorksAgent\chat-settings.json`.
+Native agents can read project files and use tools under their own permission policies;
+the old “only title/path plus command JSON” data boundary no longer applies.
 
 ## Supported operations
 
@@ -109,42 +109,37 @@ Automatic section/detail views, GD&T, fits and design-specific tolerance selecti
 implemented by this command. Those requirements must be specified and completed explicitly.
 The older specialized `drawing create-shaft` CLI remains for compatibility and is no longer
 exposed to the chat.
-The chat does not yet expose the experimental sheet-metal, knee-linkage, or
-document-discard CLI commands. Unsupported requests are answered or clarified.
+## Direct agent connection (V6)
 
-## Execution behavior
+Codex uses the official [app-server protocol](https://developers.openai.com/codex/app-server/)
+over stdio: initialize, thread/start, turn/start, streamed notifications and turn/interrupt.
+Subsequent messages reuse the thread; input during work is forwarded with turn/steer.
+There is no response schema, catalog-only prompt, 5-minute turn deadline, host summary
+request, fixed retry count or host decision about the next operation.
 
-AI replies contain a validated JSON operation plan. The app validates the entire
-plan before presenting it; it never executes AI-generated shell text or code.
-Missing dimensions, unknown commands/arguments, duplicate options and non-finite
-dimensions are rejected. Every `swagent` invocation uses an argument array and
-the process ID of the SOLIDWORKS instance hosting the pane. Active document
-title/path/type are rechecked immediately before execution; users should leave
-the CAD document unchanged while an operation is running.
+A `solidworks_cli` dynamic tool forwards an argument array and optional stdin to the
+existing Windows CLI, pinned to the hosting SOLIDWORKS process. It returns the actual
+exit code, stdout and stderr directly to Codex. All CLI commands are available, including
+API discovery/execution and other existing CLI workflows. The tool serializes CAD calls
+and allows in-flight saves/cleanup to finish on stop. The usual rebuild, geometry validation,
+file overwrite and document ownership checks remain in the CAD implementation.
 
-Existing outputs are protected by default. Reply **上書きを許可して実行** to
-explicitly pass `--overwrite` for the currently reviewed generation batch only.
-AI cannot grant this option itself. Negations, quotations and revised requests do not approve a pending batch.
-A revised request cancels the old proposal. Approval is consumed once, including when execution fails. The existing rebuild, validation, save and
-document cleanup logic stays in the SwApi layer. A failed or partially completed
-plan is consumed and cannot accidentally be replayed by sending approval again.
+Codex keeps its native file/shell tools and Windows configuration. The thread requests
+workspace-write and on-request approvals; native approval/input requests are shown in
+chat and answers are returned to Codex. No approval is invented or automatically accepted.
+The project location, CAD executable and host PID are supplied as integration context.
+The normal Codex instructions are preserved; baseInstructions are not replaced.
 
-AI calls are asynchronous, cancellable, and limited to five minutes. CAD commands
-finish their current rebuild/save/cleanup before stopping the remaining batch;
-they are not forcibly terminated midway. Closing the pane cancels an AI request
-and stops the batch after its current CAD command.
+Claude/Gemini use native stream-json CLI output and native session resume. Their tools,
+plugins and permission settings are no longer disabled by the pane. They invoke the CAD
+CLI using the supplied path/PID. Headless permission support depends on the installed CLI
+and its existing configuration; the pane currently relays interactive native approvals
+for Codex only. Claude/Gemini process stop terminates the agent, not its CAD descendants;
+wait for any active CAD operation to finish before sending another request.
 
-Provider modes:
-
-- Codex: `exec`, read-only sandbox, shell tools disabled, schema-constrained final output.
-  It uses the user's existing Windows Codex account/configuration; installed custom
-  integrations remain subject to that CLI's configuration. The provider is a trusted
-  local agent, not an isolation boundary for arbitrary third-party plugins.
-- Claude: print mode, built-in and MCP tools disabled, empty settings sources,
-  no session persistence, JSON schema.
-- Gemini: headless JSON, extensions disabled, child-only system settings overlay
-  preserving existing system settings and adding admin deny rules for all tools.
-  No user/global Gemini settings file is modified.
+This uses the vendor's agent runtime; it does not guarantee identical model selection,
+installed plugins, tools or quality to a separate desktop conversation. Codex real-runtime
+checks and Claude/Gemini adapter checks are documented separately below.
 
 ## Verification
 
@@ -160,7 +155,7 @@ Windows subprocess argument/UTF-8 round trips, cancellation, output bounds and
 all three provider adapters using local fixture processes. These tests do not
 contact paid AI services and do not prove real-account authentication.
 
-Standalone UI preview: run `SolidWorksAgent.ChatUi.V5.exe` from the addin package.
+Standalone UI preview: run `SolidWorksAgent.ChatUi.V6.exe` from the addin package.
 It displays the actual control without attaching to CAD. The `--smoke-test <png>`
 option renders the UI and exits for visual verification.
 Runtime add-in errors: `%LOCALAPPDATA%\SolidWorksAgent\addin.log`.
@@ -184,8 +179,7 @@ The UI process is Windows; WSL is only an optional development shell.
 - The final COM host was registered and loaded in the running SOLIDWORKS 2026
   instance. Its automation status reported `Connected: true` and a 393 x 1070
   task-pane control after the host's resize event.
-- This machine's registered package is `artifacts\chat-conversation`.
-  Earlier development packages under `artifacts` are not the registered final product.
+- At that verification the package was `artifacts\chat-conversation`; V6 supersedes it.
 - Windows Codex authentication and a real response were verified with ChatGPT login.
   Claude/Gemini adapter checks still use fixtures.
 - V3 assemblies and COM identity allow replacing the old loaded chat pane without
@@ -218,8 +212,7 @@ proves the embedded UI works.
 ## Existing sketch dimensions and relations
 
 In the part's chat, say `既存スケッチに寸法と拘束を追加して。形状を変えずに完全定義して`.
-The assistant first inspects the active part, then proposes the named sketch operation. Reply
-`実行して` to apply it. Changes remain in the open document, unsaved, unless you explicitly
+The agent can inspect the active part and apply/verify the requested sketch operation. Changes remain in the open document, unsaved, unless you explicitly
 request a save path. Existing files require the separate overwrite instruction.
 
 The implementation adds editable driving dimensions and geometric relations, rather than
@@ -263,9 +256,35 @@ and an assembly; native drawings and PDFs reopened/checked in SOLIDWORKS.
 
 ## Extensible API operations (V5)
 
-The chat now discovers installed API signatures and can propose structured feature
+The CLI supports discovery of installed API signatures and structured feature
 operations using `api search`, `api describe` and `api execute`. The plate command
 also supports corner fillets and ISO tapped-hole positions. See
 [API automation, examples and coverage](api-automation.md). The old fixed catalog
 is no longer the sole route for feature creation. V5 uses separate managed and COM
 identities so it can be loaded while an older pane is resident.
+
+## Native connection verification
+
+The V6 test suite covers direct input, native session reuse, streamed text, steering,
+user-input/approval forwarding, cancellation and a tool error followed by a tool success.
+Native Codex integration is exercised with synthetic tool data, not the user's CAD model.
+Claude/Gemini native adapters need the corresponding installed/authenticated Windows CLI;
+real CAD execution through those vendors has not been verified.
+
+When copying a portable Codex runtime, copy its matching helper executables too:
+
+```powershell
+.\scripts\Copy-CodexRuntime.ps1 -Destination '.\artifacts\chat-native\tools'
+```
+
+A lone `codex.exe` may answer text but fail to execute tools because
+`codex-code-mode-host.exe` is absent. The script copies and hashes the complete matching
+Windows executable set from the installed Codex app (or `-SourceDirectory`). It does
+not change Codex account configuration, sandbox configuration or WSL settings.
+
+Local V6 verification (2026-10-16): 29 core checks, 52 legacy protocol/process checks,
+4 native-session transport checks and 7 UI checks passed (92 total). Real Codex
+app-server made three synthetic tool calls: failed trial, inspection, corrected success.
+The matching native runtime is in `artifacts\chat-native\tools`. The V6 COM pane was
+registered and confirmed connected in the running SOLIDWORKS instance; V5 was unloaded.
+No CAD document was modified by the native-agent synthetic test. WSL settings are unchanged.

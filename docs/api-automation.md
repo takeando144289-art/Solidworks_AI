@@ -3,8 +3,9 @@
 The chat can discover and invoke document-local SOLIDWORKS COM APIs instead of
 requiring a dedicated CLI command for each feature. `api search` and `api describe`
 read interface signatures and enum values from the installed SOLIDWORKS interop
-assemblies. They do not execute CAD methods. The chat can chain up to eight metadata
-queries automatically, then presents the proposed changes for approval in chat.
+assemblies. They do not execute CAD methods. In V6 these operations are tools available to the native AI agent. The pane does
+not decide the search/execute/retry sequence or require a separate execution message.
+The agent can also use its native tools and inspect the project source.
 
 `api execute` accepts a structured JSON plan. The Windows host checks the entire
 plan's member signatures before creating the working document, executes calls in
@@ -41,7 +42,7 @@ are retained on disk as recovery artifacts. No Windows/WSL runtime switching is 
 ```
 
 Send this plan through standard input to `swagent api execute --plan-stdin
---output Example.SLDPRT --json`. The chat does this automatically after approval.
+--output Example.SLDPRT --json`. The native agent can invoke this directly through its CAD tool.
 Public lengths use `{ "mm": number }`, angles use `{ "deg": number }`; conversions
 happen at the COM boundary. Plain numbers are counts, flags, enum values or ratios.
 `{ "enum": "swEndConditions_e.swEndCondBlind" }` resolves installed constants.

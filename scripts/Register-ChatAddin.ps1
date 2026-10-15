@@ -4,8 +4,8 @@ param([string]$PackageDirectory = $PSScriptRoot, [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 Start-Transcript -Path (Join-Path $PackageDirectory 'registration.log') -Force | Out-Null
 trap { Write-Error $_ -ErrorAction Continue; Stop-Transcript | Out-Null; exit 1 }
-$id = '{E2CF72C9-B695-48DF-968F-EAB0E85B9A26}'
-$hostDll = Join-Path $PackageDirectory 'addin\SolidWorksAgent.ChatAddin.V5.comhost.dll'
+$id = '{E2CF72C9-B695-48DF-968F-EAB0E85B9A27}'
+$hostDll = Join-Path $PackageDirectory 'addin\SolidWorksAgent.ChatAddin.V6.comhost.dll'
 $key = "HKLM:\SOFTWARE\SolidWorks\Addins\$id"
 $startup = "HKCU:\SOFTWARE\SolidWorks\AddInsStartup\$id"
 if (-not (Test-Path $hostDll)) { throw "Package not found: $hostDll. Run Build-ChatAddin.ps1 first, then run the script in artifacts\chat-addin." }

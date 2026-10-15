@@ -16,96 +16,66 @@ internal static class Program
             {
                 count++;
                 try { await action(); Console.WriteLine("PASS " + name); }
-                catch (Exception ex) { failures++; Console.WriteLine("FAIL " + name + ": " + ex.Message); }
+                catch (Exception ex) { failures++; Console.WriteLine("FAIL " + name + ": " + ex); }
             }
-            await Test("Read-only confirmation executes and reports in chat", async () =>
+            await Test("User request reaches native session verbatim without approval", async () =>
             {
-                using var f = new Fixture(window, new ChatReply("確認します。", [new("info", [])]));
-                await f.Send("接続を確認して");
-                Check(f.Text.Contains("SOLIDWORKSに接続できています。") && f.Writes.Count == 0);
+                using var f = new Fixture(window);
+                await f.Send("  この部品の図面を作って\n寸法も入れて。  ");
+                Check(f.Session.Messages.Single() == "  この部品の図面を作って\n寸法も入れて。  ");
+                Check(f.Text.Contains("native reply") && !f.Text.Contains("よければ「実行して」"));
             });
-            await Test("Changes await text approval and cannot replay", async () =>
+            await Test("Conversation reuses vendor session", async () =>
             {
-                using var f = new Fixture(window, Proposal());
-                await f.Send("円柱を作って"); Check(f.Writes.Count == 0 && f.Text.Contains("実行して"));
-                await f.Send("実行して"); Check(f.Writes.Count == 1 && !f.Writes[0]);
-                await f.Send("実行して"); Check(f.Writes.Count == 1 && f.Text.Contains("実行待ちの操作はありません"));
-                Check(!f.Panel.Controls.Cast<Control>().SelectMany(Descendants).Any(c => c.Text == "この操作を実行"));
+                using var f = new Fixture(window); await f.Send("図面を作って"); await f.Send("右側面も追加して");
+                Check(f.Creations == 1 && f.Session.Messages.Count == 2);
             });
-            await Test("Cancellation removes the pending batch", async () =>
+            await Test("No reply JSON plan interpretation or host execution", async () =>
             {
-                using var f = new Fixture(window, Proposal());
-                await f.Send("円柱を作って"); await f.Send("やめて"); await f.Send("実行して"); Check(f.Writes.Count == 0);
+                using var f = new Fixture(window);
+                f.Session.Run = (_, display, _, _) => { display(new("message", "{\"commands\":[{\"command\":\"arbitrary-native-output\"}]}")); return Task.CompletedTask; };
+                await f.Send("作って"); Check(f.Text.Contains("arbitrary-native-output") && f.Creations == 1);
             });
-            await Test("Explicit overwrite is scoped to one batch", async () =>
+            await Test("Streams text once even with final item notification", async () =>
             {
-                using var f = new Fixture(window, Proposal(), new("完了", []), Proposal());
-                await f.Send("円柱を作って"); await f.Send("上書きを許可して実行");
-                await f.Send("別の円柱を作って"); await f.Send("実行して");
-                Check(f.Writes.SequenceEqual(new[] { true, false }));
+                using var f = new Fixture(window);
+                f.Session.Run = (_, display, _, _) => { display(new("delta", "確認", "one")); display(new("delta", "しました", "one")); display(new("message", "確認しました", "one")); return Task.CompletedTask; };
+                await f.Send("確認して"); Check(f.Text.Split("確認しました").Length == 2);
             });
-            await Test("Revised request invalidates previous batch", async () =>
+            await Test("Native user-input request uses the same chat", async () =>
             {
-                using var f = new Fixture(window, Proposal(), new("寸法を教えてください。", []));
-                await f.Send("円柱を作って"); await f.Send("長さを変更したい"); await f.Send("実行して"); Check(f.Writes.Count == 0);
+                using var f = new Fixture(window); string? answer = null;
+                f.Session.Run = async (_, _, ask, token) => { answer = await ask(new("穴径を教えてください", []), token); };
+                var task = f.Send("穴を追加して"); Check(!task.IsCompleted);
+                await f.Send("3 mm"); await task; Check(answer == "3 mm" && f.Session.Messages.Count == 1);
             });
-            await Test("Changed active document prevents execution", async () =>
+            await Test("New input during work steers native agent", async () =>
             {
-                using var f = new Fixture(window, Proposal());
-                await f.Send("円柱を作って"); f.Title = "Other part"; await f.Send("実行して");
-                Check(f.Writes.Count == 0 && f.Text.Contains("ドキュメントが変わりました"));
+                using var f = new Fixture(window); var done = new TaskCompletionSource();
+                f.Session.Run = (_, _, _, _) => done.Task;
+                var task = f.Send("図面を作って"); await f.Send("A3にして");
+                done.SetResult(); await task; Check(f.Session.Steering.Single() == "A3にして");
             });
-            await Test("Failure consumes approval", async () =>
+            await Test("Stop cancels native turn without another agent turn", async () =>
             {
-                using var f = new Fixture(window, Proposal()) { FailWrite = true };
-                await f.Send("円柱を作って"); await f.Send("実行して"); await f.Send("実行して"); Check(f.Writes.Count == 1);
-            });
-            await Test("Summary cannot enqueue further operations", async () =>
-            {
-                using var f = new Fixture(window, Proposal(), Proposal());
-                await f.Send("円柱を作って"); await f.Send("実行して"); await f.Send("実行して"); Check(f.Writes.Count == 1);
-            });
-            await Test("Inspection proposes sketch changes and waits for text approval", async () =>
-            {
-                var plan = new ChatReply("寸法を追加します。", [new("sketch fully-define", [new("sketch", "Sketch1"), new("expected", new string('A', 64))])]);
-                using var f = new Fixture(window, new ChatReply("確認します。", [new("sketch inspect", [])]), plan);
-                await f.Send("既存スケッチを完全定義して"); Check(f.Writes.Count == 0 && f.Text.Contains("実行して"));
-                await f.Send("実行して"); Check(f.Writes.Count == 1);
-                await f.Send("実行して"); Check(f.Writes.Count == 1);
-            });
-            await Test("API discovery chains automatically but changes await approval", async () =>
-            {
-                using var f = new Fixture(window,
-                    new("検索します",[new("api search",[new("query","Fillet")])]),
-                    new("引数を確認します",[new("api describe",[new("interface","IFeatureManager"),new("member","FeatureFillet3")])]),
-                    Proposal());
-                await f.Send("角を丸めた部品を作って");
-                Check(f.Writes.Count==0 && f.Text.Contains("実行して"));
-                await f.Send("実行して"); Check(f.Writes.Count==1);
+                using var f = new Fixture(window);
+                f.Session.Run = (_, _, _, token) => Task.Delay(Timeout.Infinite, token);
+                var task = f.Send("作成して"); await f.Send("やめて"); await task;
+                Check(f.Session.Messages.Count == 1);
             });
             Console.WriteLine($"{count - failures}/{count} UI workflow checks passed"); window.Close();
         };
         Application.Run(window); return failures == 0 ? 0 : 1;
     }
-    static IEnumerable<Control> Descendants(Control c) => new[] { c }.Concat(c.Controls.Cast<Control>().SelectMany(Descendants));
     static void Check(bool condition) { if (!condition) throw new Exception("Assertion failed"); }
-    static ChatReply Proposal() => new("直径10mm、長さ30mmの円柱を作成します。", [new("part create-cylinder", [new("diameter", "10"), new("length", "30")])]);
     sealed class Fixture : IDisposable
     {
         public ChatPanel Panel { get; }
-        public List<bool> Writes { get; } = [];
-        public string Title = "Part1";
-        public bool FailWrite;
-        public Fixture(Form form, params ChatReply[] replies)
+        public FakeSession Session { get; } = new();
+        public int Creations;
+        public Fixture(Form form)
         {
-            Panel = new ChatPanel(123, new Provider(replies), (c, overwrite) =>
-            {
-                if (c.Command == "info") return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(new { Connected = true, Title, Path = "", Type = 1 }));
-                if (ChatIntents.IsReadOnly(c)) return Task.FromResult("{\"Sketches\":[]}");
-                Writes.Add(overwrite);
-                if (FailWrite) throw new IOException("Fixture failure");
-                return Task.FromResult("{\"Saved\":\"fixture.SLDPRT\"}");
-            });
+            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; });
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;
@@ -117,10 +87,18 @@ internal static class Program
         }
         public void Dispose() => Panel.Dispose();
     }
-    sealed class Provider(IEnumerable<ChatReply> replies) : IChatProvider
+    sealed class FakeSession : IAgentSession
     {
-        private readonly Queue<ChatReply> _replies = new(replies);
-        public Task<ChatReply> ReplyAsync(ChatSettings settings, IReadOnlyList<ChatMessage> history, string context, CancellationToken token)
-            => Task.FromResult(_replies.Count > 0 ? _replies.Dequeue() : new ChatReply("完了しました。", []));
+        public List<string> Messages { get; } = [];
+        public List<string> Steering { get; } = [];
+        public Func<string, Action<AgentEvent>, Func<AgentQuestion, CancellationToken, Task<string>>, CancellationToken, Task>? Run;
+        public Task SendAsync(string message, Action<AgentEvent> display, Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token)
+        {
+            Messages.Add(message);
+            if (Run is not null) return Run(message, display, ask, token);
+            display(new("message", "native reply")); return Task.CompletedTask;
+        }
+        public Task SteerAsync(string message, CancellationToken token) { Steering.Add(message); return Task.CompletedTask; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
