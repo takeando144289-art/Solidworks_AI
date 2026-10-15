@@ -160,7 +160,7 @@ Windows subprocess argument/UTF-8 round trips, cancellation, output bounds and
 all three provider adapters using local fixture processes. These tests do not
 contact paid AI services and do not prove real-account authentication.
 
-Standalone UI preview: run `SolidWorksAgent.ChatUi.V4.exe` from the addin package.
+Standalone UI preview: run `SolidWorksAgent.ChatUi.V5.exe` from the addin package.
 It displays the actual control without attaching to CAD. The `--smoke-test <png>`
 option renders the UI and exits for visual verification.
 Runtime add-in errors: `%LOCALAPPDATA%\SolidWorksAgent\addin.log`.
@@ -260,3 +260,12 @@ Windows CLI authentication and WSL configuration are unchanged.
 
 Validation: two-stage 30 mm shaft, imported curved/sheet-metal part with seven views,
 and an assembly; native drawings and PDFs reopened/checked in SOLIDWORKS.
+
+## Extensible API operations (V5)
+
+The chat now discovers installed API signatures and can propose structured feature
+operations using `api search`, `api describe` and `api execute`. The plate command
+also supports corner fillets and ISO tapped-hole positions. See
+[API automation, examples and coverage](api-automation.md). The old fixed catalog
+is no longer the sole route for feature creation. V5 uses separate managed and COM
+identities so it can be loaded while an older pane is resident.

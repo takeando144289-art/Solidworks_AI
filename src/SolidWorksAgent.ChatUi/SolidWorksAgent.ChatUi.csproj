@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>SolidWorksAgent.ChatUi.V4</AssemblyName>
+    <AssemblyName>SolidWorksAgent.ChatUi.V5</AssemblyName>
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>

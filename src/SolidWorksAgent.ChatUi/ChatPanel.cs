@@ -24,6 +24,7 @@ public sealed class ChatPanel : UserControl
     private string _plannedDocument = "";
     private bool _busy;
     private bool _stopAfterCurrent;
+    private int _inspectionRounds;
 
     public ChatPanel(int solidWorksPid, IChatProvider? provider = null, Func<CadCommand, bool, Task<string>>? execute = null)
     {
@@ -137,7 +138,7 @@ public sealed class ChatPanel : UserControl
             if (_pending.Length == 0) { Append("案内", "実行待ちの操作はありません。作りたいものや変更内容を教えてください。"); return; }
             await RunAsync(intent == ChatIntent.ExecuteWithOverwrite); return;
         }
-        ClearPlan(); Busy(true); _stopAfterCurrent = false;
+        ClearPlan(); Busy(true); _stopAfterCurrent = false; _inspectionRounds = 0;
         _request = new CancellationTokenSource();
         try
         {
@@ -171,8 +172,9 @@ public sealed class ChatPanel : UserControl
     private void ShowPlan()
     {
             var details = string.Join("\n", _pending.Select((c, i) =>
-                $"{i + 1}. {OperationName(c.Command)}" + (c.Arguments.Length == 0 ? "" : "：" + string.Join("、", c.Arguments.Where(a => a.Name != "expected").Select(a => $"{ArgumentName(a.Name)}={a.Value}")))));
-            var notice = "予定している操作\n" + details + "\n\nよければ「実行して」と返信してください。変更や取り消しもここに入力できます。既存ファイルの上書きが必要な場合は「上書きを許可して実行」と明示してください。";
+                $"{i + 1}. {OperationName(c.Command)}" + (c.Arguments.Length == 0 ? "" : "：" + string.Join("、", c.Arguments.Where(a => a.Name is not ("expected" or "plan")).Select(a => $"{ArgumentName(a.Name)}={a.Value}")))));
+            var descriptions = string.Join("\n", _pending.Where(c=>c.Command=="api execute").Select(c=>SolidWorksAgent.Core.Automation.ApiPlan.Parse(c.Arguments.Single(a=>a.Name=="plan").Value).Summary));
+            var notice = "予定している操作\n" + descriptions + "\n" + details + "\n\nよければ「実行して」と返信してください。変更や取り消しもここに入力できます。既存ファイルの上書きが必要な場合は「上書きを許可して実行」と明示してください。";
             Append("案内", notice); _history.Add(new("host", notice));
             _status.Text = "返信をお待ちしています";
     }
@@ -181,6 +183,8 @@ public sealed class ChatPanel : UserControl
     {
         if (_busy || _pending.Length == 0) return;
         var commands = _pending;
+        if (commands.All(ChatIntents.IsReadOnly) && ++_inspectionRounds > 8)
+        { ClearPlan(); Append("案内", "APIの確認を8回行いました。確認済みの情報を使い、操作内容を絞って続けてください。"); return; }
         // Consume once: repeated approval must never replay a completed or failed batch.
         _pending = []; Busy(true); _stopAfterCurrent = false;
         var ownsRequest = _request is null;
@@ -223,7 +227,7 @@ public sealed class ChatPanel : UserControl
                             foreach (var command in summary.Commands) CommandCatalog.Validate(command);
                             _plannedDocument = await ContextAsync();
                             if (DocumentKey(_plannedDocument) != DocumentKey(current)) throw new InvalidOperationException("確認中にドキュメントが変わりました。再度指示してください。");
-                            _pending = summary.Commands; ShowPlan();
+                            _pending = summary.Commands; if (!_pending.All(ChatIntents.IsReadOnly)) ShowPlan();
                         }
                     }
                     catch (Exception ex) { Append("実行結果", string.Join("\n", results)); Append("案内", "操作は完了しました。要約を取得できませんでした：" + ex.Message); }
@@ -238,6 +242,7 @@ public sealed class ChatPanel : UserControl
             Append("実行エラー", ex.Message); if (!IsDisposed) _status.Text = "実行を停止しました";
         }
         finally { if (ownsRequest) { _request?.Dispose(); _request = null; } if (!IsDisposed) { if (_pending.Length == 0) ClearPlan(); Busy(false); } }
+        if (!IsDisposed && !_stopAfterCurrent && _pending.Length > 0 && _pending.All(ChatIntents.IsReadOnly)) await RunAsync(false);
     }
     private static string ConnectionSummary(string json)
     {
@@ -251,6 +256,7 @@ public sealed class ChatPanel : UserControl
         "sketch list" or "sketch inspect" => "スケッチの寸法・拘束を確認", "sketch fully-define" => "スケッチを完全定義",
         "sketch add-dimension" => "駆動寸法を追加", "sketch add-relation" => "幾何拘束を追加",
         "info" => "接続の確認", "documents list" => "開いているドキュメントの確認", "part inspect" => "部品形状の確認",
+        "api search" => "APIを検索", "api describe" => "APIの仕様を確認", "api execute" => "API操作案を実行", "part create-plate" => "角R・タップ穴付きプレートを作成",
         "part create-cylinder" => "円柱を作成", "part create-shaft" => "段付きシャフトを作成", "part create-tube" => "パイプを作成",
         "assembly create-bearing-test" => "軸受アセンブリを作成", "assembly analyze" => "アセンブリの干渉を確認",
         "drawing create" => "部品・アセンブリの図面を作成", "drawing inspect" => "図面の確認", "view isometric" => "等角表示に変更", _ => command

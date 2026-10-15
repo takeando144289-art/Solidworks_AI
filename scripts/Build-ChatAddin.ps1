@@ -41,5 +41,6 @@ Invoke-DotNet @('publish', (Join-Path $root 'src\SolidWorksAgent.SwApi\Addin\Sol
 @{ projectDirectory = $root; cadExecutable = (Join-Path $package 'cli\swagent.exe') } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $package 'addin\chat-defaults.json')
 Copy-Item (Join-Path $PSScriptRoot 'Register-ChatAddin.ps1') $package
 Copy-Item (Join-Path $root 'docs\chat-addin.md') $package
+Copy-Item (Join-Path $root 'docs\api-automation.md') $package
 Write-Output "Package ready: $package"
 Write-Output 'Register using elevated Windows PowerShell: .\Register-ChatAddin.ps1'

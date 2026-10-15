@@ -1,3 +1,5 @@
+using SolidWorksAgent.Core.Automation;
+using System.Text.Json;
 using SolidWorksAgent.Core.Design;
 using SolidWorksAgent.Core.Drawing;
 using SolidWorksAgent.Core.Models;
@@ -5,6 +7,13 @@ using SolidWorksAgent.Core.Validation;
 
 var tests = new (string Name, Action Test)[]
 {
+    ("API plans reject unapproved application access", () => MustThrow<ArgumentException>(() => ApiPolicy.Validate("ISldWorks","RunMacro2"))),
+    ("API plans cannot bypass host save", () => MustThrow<ArgumentException>(() => ApiPolicy.Validate("IModelDoc2","SaveAs3"))),
+    ("API plans support feature operations", () => { ApiPolicy.Validate("IFeatureManager","FeatureFillet3"); ApiPolicy.Validate("ISketchManager","InsertSketch"); }),
+    ("Plate recipe round trips through strict plan validation", () => { var p=PlateRecipe.Create(150,20,3,5,[[10,10],[20,10]],"M3x0.5"); ApiPlan.Parse(JsonSerializer.Serialize(p,ApiPlan.Json)); }),
+    ("Plate rejects holes outside material", () => MustThrow<ArgumentException>(()=>PlateRecipe.Create(150,20,3,5,[[1,1]]))),
+    ("Plate rejects overlapping holes", () => MustThrow<ArgumentException>(()=>PlateRecipe.Create(150,20,3,5,[[10,10],[11,10]]))),
+    ("API rejects forward object references", () => MustThrow<ArgumentException>(()=>ApiPlan.Parse("""{"summary":"test","document":"new-part","steps":[{"id":"a","target":"missing","interface":"IModelDoc2","member":"ClearSelection2","kind":"call","args":[true]}]}"""))),
     ("Drawing layout supports arbitrary stage sizes", () => CheckDrawingLayout([new(30,20),new(30,30),new(20,30),new(40,35)])),
     ("Drawing layout scales large models onto one sheet", () => CheckDrawingLayout([new(25000,3000),new(25000,5000),new(3000,5000),new(28000,6000)])),
     ("Drawing layout places all seven views", () => CheckDrawingLayout(Enumerable.Repeat(new DrawingLayout.Size(200,150),7).ToArray())),

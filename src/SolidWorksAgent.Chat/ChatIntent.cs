@@ -20,5 +20,5 @@ public static class ChatIntents
     }
 
     public static bool IsReadOnly(CadCommand command) => command.Command is
-        "info" or "documents list" or "sketch list" or "sketch inspect" or "part inspect" or "drawing inspect" or "assembly analyze";
+        "api search" or "api describe" or "info" or "documents list" or "sketch list" or "sketch inspect" or "part inspect" or "drawing inspect" or "assembly analyze";
 }

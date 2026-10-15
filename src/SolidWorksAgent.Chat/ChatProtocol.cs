@@ -1,3 +1,4 @@
+using SolidWorksAgent.Core.Automation;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -46,7 +47,31 @@ public static class ChatProtocol
         shell commands, read local files, or modify CAD yourself. The host validates and executes approved operations.
         Never claim an operation succeeded until a host execution result says it did. Ask for missing dimensions,
         files, and design requirements in reply, with commands: []. Dimensions are millimetres.
-        Use only the supported commands below. Argument names have no leading --; values are strings.
+        Use the supported commands, including the extensible api search/describe/execute route. Argument names have no leading --; values are strings.
+        Never refuse a CAD feature solely because it has no dedicated command. Search the installed API first.
+        api search query uses English keywords (Fillet, HoleWizard, Extrusion, Cut, Revolve, Loft, Sweep, Pattern,
+        Chamfer, Shell, SheetMetal, Mate, Section, Detail). api describe interface=IFeatureManager member=HoleWizard5
+        returns the actual signature; interface may also name a swconst enum. Further read-only discovery runs automatically.
+        For a plate use part create-plate: width/height/thickness/radius in mm; holes is a JSON array of [x,y] mm
+        from the plate's lower-left corner, thread e.g. M3x0.5. These are actual ISO Hole Wizard tapped holes,
+        not plain clearance holes or cosmetic labels. Ask for missing edge margins/row layout when a pitch alone
+        does not define positions. For clearance/countersunk holes or other geometry use the generic API route.
+        api execute has required plan (JSON encoded as a string) and output (new CAD filename).
+        Plan schema: {"summary":"user-visible change","document":"new-part|new-assembly|new-drawing|copy-active","steps":[
+        {"id":"uniqueName","target":"model","interface":"IModelDoc2","member":"ClearSelection2","kind":"call","args":[true],"expect":"success"}]}.
+        Roots: model, sketch (ISketchManager), features (IFeatureManager), extension (IModelDocExtension),
+        plane (first reference plane, IFeature), math (IMathUtility). A step's return value is referenced by id;
+        arrays use id[0], by-ref arguments use id_out[0]. Arguments support primitives, arrays, null,
+        {"ref":"id"}, {"mm":20}, {"deg":90}, {"enum":"swEndConditions_e.swEndCondBlind"}.
+        ALL geometric lengths/coordinates must use mm tags; angles use deg tags; numbers are for counts/flags/ratios.
+        kind is call/get/set; property set takes one value. expect defaults to success (reject false/null),
+        use any only when false/null is an expected observation; true/not-null are explicit assertions.
+        Query signatures before building a new recipe. There is no arbitrary shell/code execution.
+        New documents are created from configured templates; copy-active currently edits a COPY of an active PART.
+        Existing assembly/drawing edits are not yet supported by copy-active; do not pretend otherwise.
+        Save/export/application-wide operations are host-owned, cannot be invoked through the recipe.
+        API method calls are always changes requiring chat approval, even calls with Get in their names.
+        Do not claim every UI-only, licensed, or untested API function works. Report precise API errors and limitations.
         No overwrite, discard, config, template, executable, shell or arbitrary code arguments are supported.
         Existing files are protected; the host owns overwrite permission. Prefer unique descriptive output names.
         Reuse explicit model paths from host results. Relative input paths are relative to the configured project
@@ -88,6 +113,10 @@ public static class CommandCatalog
     public sealed record Definition(string Required, string Optional, bool Creates = false);
     public static readonly IReadOnlyDictionary<string, Definition> Definitions = new Dictionary<string, Definition>(StringComparer.Ordinal)
     {
+        ["api search"] = new("query", "interface offset"),
+        ["api describe"] = new("interface", "member"),
+        ["api execute"] = new("plan output", "", true),
+        ["part create-plate"] = new("width height thickness", "radius holes thread output", true),
         ["info"] = new("", ""),
         ["documents list"] = new("", ""),
         ["sketch inspect"] = new("", "sketch"),
@@ -121,13 +150,13 @@ public static class CommandCatalog
         foreach (var arg in command.Arguments)
         {
             if (arg is null || arg.Name is null || !allowed.Contains(arg.Name) || string.IsNullOrWhiteSpace(arg.Value)
-                || arg.Value.Length > 2048 || arg.Value.Any(char.IsControl) || arg.Value.StartsWith('-')
+                || (arg.Name == "plan" ? arg.Value.Length > 200_000 : arg.Value.Length > 2048) || (arg.Name != "plan" && arg.Value.Any(char.IsControl)) || arg.Value.StartsWith('-')
                 || !values.TryAdd(arg.Name, arg.Value))
                 throw new ArgumentException("不正・重複・未対応の引数があります。");
         }
         foreach (var name in Words(definition.Required))
             if (!values.ContainsKey(name)) throw new ArgumentException($"{name} が必要です。");
-        foreach (var name in new[] { "diameter", "length", "outer-diameter", "inner-diameter", "tolerance", "value" })
+        foreach (var name in new[] { "diameter", "length", "outer-diameter", "inner-diameter", "tolerance", "value", "width", "height", "thickness" })
             if (values.TryGetValue(name, out var value)) Positive(value);
         if (values.TryGetValue("expected", out var fingerprint) && (fingerprint.Length != 64 || !fingerprint.All(Uri.IsHexDigit)))
             throw new ArgumentException("スケッチの確認結果が必要です。");
@@ -141,6 +170,14 @@ public static class CommandCatalog
             throw new ArgumentException("未対応の寸法種類です。");
         if (command.Command == "sketch add-relation" && !new[] { "horizontal", "vertical", "tangent", "parallel", "perpendicular", "coincident", "concentric", "midpoint", "equal", "collinear" }.Contains(values["kind"]))
             throw new ArgumentException("未対応の幾何拘束です。");
+        if (command.Command == "api execute") ApiPlan.Parse(values["plan"]);
+        if (command.Command == "api search" && values.TryGetValue("offset", out var offset) && (!int.TryParse(offset, out var page) || page < 0))
+            throw new ArgumentException("API検索の開始位置が不正です。");
+        if (command.Command == "part create-plate")
+            PlateRecipe.Create(Positive(values["width"]),Positive(values["height"]),Positive(values["thickness"]),
+                values.TryGetValue("radius",out var radius) ? double.Parse(radius,CultureInfo.InvariantCulture) : 0,
+                values.TryGetValue("holes",out var holes) ? JsonSerializer.Deserialize<double[][]>(holes) ?? [] : [],
+                values.GetValueOrDefault("thread","M3x0.5"));
         if (command.Command == "drawing create")
         {
             foreach (var (key, allowedValues) in new[] { ("paper", new[] { "auto", "A4", "A3", "A2", "A1", "A0" }), ("views", new[] { "standard", "all" }), ("dimensions", new[] { "auto", "model", "none" }) })

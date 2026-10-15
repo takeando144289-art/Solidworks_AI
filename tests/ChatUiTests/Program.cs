@@ -73,6 +73,16 @@ internal static class Program
                 await f.Send("実行して"); Check(f.Writes.Count == 1);
                 await f.Send("実行して"); Check(f.Writes.Count == 1);
             });
+            await Test("API discovery chains automatically but changes await approval", async () =>
+            {
+                using var f = new Fixture(window,
+                    new("検索します",[new("api search",[new("query","Fillet")])]),
+                    new("引数を確認します",[new("api describe",[new("interface","IFeatureManager"),new("member","FeatureFillet3")])]),
+                    Proposal());
+                await f.Send("角を丸めた部品を作って");
+                Check(f.Writes.Count==0 && f.Text.Contains("実行して"));
+                await f.Send("実行して"); Check(f.Writes.Count==1);
+            });
             Console.WriteLine($"{count - failures}/{count} UI workflow checks passed"); window.Close();
         };
         Application.Run(window); return failures == 0 ? 0 : 1;

@@ -1,3 +1,5 @@
+using SolidWorksAgent.Core.Automation;
+using SolidWorksAgent.SwApi.Automation;
 using System.Text.Json;
 using System.Reflection;
 using SolidWorksAgent.Core.Configuration;
@@ -45,12 +47,21 @@ static int Run(string[] args)
                 throw new ArgumentException("--solidworks-pid requires a positive process ID.");
             processId = requestedPid;
         }
+        if (args[0] == "api" && args.Length > 1 && args[1] is "search" or "describe")
+        {
+            var catalog = new ApiCatalog();
+            object metadata = args[1] == "search" ? catalog.Search(parsed.Value("--query") ?? "", parsed.Value("--interface"), int.Parse(parsed.Value("--offset") ?? "0"))
+                : catalog.Describe(parsed.Value("--interface") ?? throw new ArgumentException("--interface is required"), parsed.Value("--member"));
+            Console.WriteLine(JsonSerializer.Serialize(metadata, JsonOptions)); return 0;
+        }
         connection.ConnectToRunningSolidWorks(processId);
-        bool managed=args[0] is "part" or "assembly" or "drawing" || (args[0]=="documents"&&args.Length>1&&args[1]=="open-final");
+        bool managed=args[0] is "part" or "assembly" or "drawing" or "api" || (args[0]=="documents"&&args.Length>1&&args[1]=="open-final");
         using var documents=managed?connection.BeginDocumentSession(options.WorkspaceRoot):null;
 
         object result = args[0].ToLowerInvariant() switch
         {
+            "api" when args.Length > 1 && args[1] == "execute" => ExecuteApi(connection, options, parsed),
+            "part" when args.Length > 1 && args[1] == "create-plate" => CreatePlate(connection, options, parsed),
             "connect" => new { connected = true },
             "chat" when args.Length > 1 && args[1] == "load-addin" => connection.LoadChatAddin(parsed.Value("--path") ?? throw new ArgumentException("--path is required")),
             "chat" when args.Length > 1 && args[1] == "unload-addin" => connection.UnloadChatAddin(parsed.Value("--path") ?? throw new ArgumentException("--path is required")),
@@ -100,7 +111,7 @@ static int Run(string[] args)
         };
 
         if(documents!=null) {
-            bool creates=args.Length>1&&(args[1].StartsWith("create-",StringComparison.OrdinalIgnoreCase)||args[1] is "create" or "prepare-sheet-metal" or "dimension-sheet-metal" or "aux-sheet-metal" or "open-final");
+            bool creates=args.Length>1&&(args[1].StartsWith("create-",StringComparison.OrdinalIgnoreCase)||args[1] is "execute" or "create" or "prepare-sheet-metal" or "dimension-sheet-metal" or "aux-sheet-metal" or "open-final");
             var value=JsonSerializer.SerializeToElement(result);
             var finals=creates?new[]{"Drawing","DrawingPath","Path"}.Where(key=>value.TryGetProperty(key,out var p)&&p.ValueKind==JsonValueKind.String).Select(key=>value.GetProperty(key).GetString()!).Where(path=>new[]{".SLDPRT",".SLDASM",".SLDDRW"}.Contains(Path.GetExtension(path).ToUpperInvariant())).Take(1).ToArray():[];
             var cleanup=documents.Complete(finals,saveGeneratedChanges:creates&&args[1]!="open-final");
@@ -197,6 +208,25 @@ static object SetIsometricView(SwConnection connection)
     return new { view = "Isometric", zoomToFit = true };
 }
 
+static object ExecuteApi(SwConnection connection, AgentOptions options, Arguments args)
+{
+    Console.InputEncoding = System.Text.Encoding.UTF8;
+    var json = args.Has("--plan-stdin") ? Console.In.ReadToEnd() : args.Value("--plan") ?? throw new ArgumentException("--plan or --plan-stdin is required");
+    var plan = ApiPlan.Parse(json);
+    var name = args.Value("--output") ?? throw new ArgumentException("--output is required");
+    var output = Path.IsPathRooted(name) ? name : Path.Combine(options.WorkspaceRoot, "api", name);
+    return new ApiExecutor(connection).Execute(plan, options, output, args.Has("--overwrite"));
+}
+static object CreatePlate(SwConnection connection, AgentOptions options, Arguments args)
+{
+    var holes = JsonSerializer.Deserialize<double[][]>(args.Value("--holes") ?? "[]") ?? [];
+    var plan = PlateRecipe.Create(args.RequiredDouble("--width"),args.RequiredDouble("--height"),args.RequiredDouble("--thickness"),
+        args.Has("--radius") ? args.RequiredDouble("--radius") : 0, holes,args.Value("--thread") ?? "M3x0.5");
+    var name = args.Value("--output") ?? "Plate_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT";
+    var output = Path.IsPathRooted(name) ? name : Path.Combine(options.WorkspaceRoot,"parts",name);
+    return new ApiExecutor(connection).Execute(plan,options,output,args.Has("--overwrite"));
+}
+
 static object CreateGeneralDrawing(SwConnection connection, AgentOptions options, Arguments args)
 {
     var name = args.Value("--output") ?? "Drawing_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDDRW";
@@ -243,14 +273,18 @@ SolidWorks AI Agent CLI
 
 Usage:
   All CAD commands accept --solidworks-pid <pid> to target a specific running instance.
+  swagent api search --query <English-keyword> [--interface <IFeatureManager>] [--offset <n>] [--json]
+  swagent api describe --interface <API-interface-or-enum> [--member <name>] [--json]
+  swagent api execute --plan-stdin --output <new-CAD-file> [--overwrite] [--json]
+  swagent part create-plate --width <mm> --height <mm> --thickness <mm> [--radius <mm>] [--holes <JSON-xy-array>] [--thread M3x0.5] [--output <new.SLDPRT>] [--json]
   swagent connect [--json]
   swagent sketch list|inspect [--sketch <name>] [--json]
   swagent sketch fully-define --sketch <name> [--expected <fingerprint>] [--output <new.SLDPRT>] [--overwrite] [--json]
   swagent sketch add-dimension --sketch <name> --kind <length|distance|horizontal|vertical|diameter|radius> --entities <ids> [--value <mm>] [--json]
   swagent sketch add-relation --sketch <name> --kind <horizontal|vertical|coincident|concentric|parallel|perpendicular|tangent|equal|midpoint|collinear> --entities <ids> [--json]
   swagent chat check-connection [--solidworks-pid <pid>] [--json]
-  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V4.comhost.dll> [--json]
-  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V4.comhost.dll> [--json]
+  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V5.comhost.dll> [--json]
+  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V5.comhost.dll> [--json]
   swagent info [--json]
   swagent part create-cylinder --diameter <mm> --length <mm>
       [--output <name.SLDPRT>] [--template <file.prtdot>] [--overwrite]

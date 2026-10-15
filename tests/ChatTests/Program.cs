@@ -29,6 +29,9 @@ var fixture = """{"reply":"円柱を作成します。","commands":[{"command":"
 CadCommand Cylinder(params CommandArgument[] extras) => new("part create-cylinder", [new("diameter", "30"), new("length", "20"), .. extras]);
 var tests = new List<(string, Action)>
 {
+    ("API method names do not bypass change approval", () => Check(!ChatIntents.IsReadOnly(new("api execute",[])))),
+    ("API metadata discovery is read-only", () => Check(ChatIntents.IsReadOnly(new("api describe",[new("interface","IFeatureManager")])))),
+    ("Plate accepts explicit thread positions", () => CommandCatalog.Validate(new("part create-plate",[new("width","150"),new("height","20"),new("thickness","3"),new("radius","5"),new("holes","[[10,10],[20,10]]"),new("thread","M3x0.5")]))),
     ("Drawing can use any active model without shaft parameters", () => CommandCatalog.Validate(new("drawing create", []))),
     ("General drawing supports assembly and large paper", () => CommandCatalog.Validate(new("drawing create", [new("model", "C:\\Parts\\assembly.SLDASM"),new("paper", "A0"),new("scale", "0.01"),new("views", "all")]))),
     ("Drawing rejects invalid scale", () => Reject(() => CommandCatalog.Validate(new("drawing create", [new("scale", "NaN")])))),

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>SolidWorksAgent.Chat.V4</AssemblyName>
+    <AssemblyName>SolidWorksAgent.Chat.V5</AssemblyName>
     <TargetFramework>net8.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>

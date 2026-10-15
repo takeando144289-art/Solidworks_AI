@@ -107,3 +107,9 @@ The lifecycle tracks documents opened or created by the command using pinned COM
 - `documents verify-cleanup --path <final.SLDDRW> --json`: exercise success/failure cleanup with unsaved temporary drawings, including protection of an existing unsaved control document.
 
 Validation: 17 unit checks, live success/failure/unsaved-preservation checks, and an actual dimensioned-drawing generation/reopen check. The 70 drawing dimensions remain unchanged.
+
+## Extensible chat API operations
+
+The Windows chat can search installed SOLIDWORKS API signatures and propose structured
+feature operations beyond the dedicated command catalog. Plate creation, corner
+fillets and tapped holes are included. See [API automation and current coverage](docs/api-automation.md).
