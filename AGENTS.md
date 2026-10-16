@@ -1,13 +1,15 @@
-# SolidWorksAgent development notes
+# 共通指示
 
-- Keep all SolidWorks COM calls inside `src/SolidWorksAgent.SwApi`.
-- Public dimensions use millimetres; convert to metres only at the COM boundary.
-- Never overwrite an existing CAD file unless the caller explicitly passes `--overwrite`.
-- Every feature operation must rebuild and validate the resulting geometry.
-- By default, fully define every sketch created or edited as part of the requested task, including sketches used by generated features, without waiting for a separate user instruction. Do not modify unrelated preexisting sketches.
-- Use meaningful, editable driving dimensions and geometric relations that express the design intent. Matching coordinates or sizes alone is not sufficient. Do not use blanket Fix/Block constraints merely to achieve fully defined status, or duplicate dimensions/relations that already exist.
-- After sketch changes, rebuild and inspect the SOLIDWORKS solver state: verify that the sketch is fully defined and has no conflicting or over-defining dimensions/relations. Preserve intended geometry; when constraining an existing sketch, do not resize or move it unless requested. Diagnose and resolve remaining degrees of freedom using available tools before reporting completion. If verification or full definition cannot be achieved, clearly report the remaining issue instead of claiming completion.
-- Explicit user instructions take precedence. Leave degrees of freedom only when the user requests it or the requested design requires them (for example, an intentionally movable layout); explain which degrees of freedom remain and why. Ask only when missing design intent prevents a sound choice.
-- CLI commands must support machine-readable JSON where applicable.
-- Default to one drawing sheet per part. Arrange necessary views and dimensions on that sheet while preserving legibility. Clearly communicate any necessary exception and the sheet count.
-- After generation, keep the saved final CAD output open and close input/intermediate documents opened by the command, including unsaved failed trials. Do not leave trial documents open for inspection. Protect preexisting user documents and unsaved user changes; closing a document does not authorize deleting its disk file.
+- モデルの作成・変更前に `CAD_MODEL_RULES.md`、図面の作成・変更前に `DRAWING_RULES.md` を読む。両方を行う場合は両方読む。
+- ユーザーの明示的な指示を優先する。操作方法は状況に応じて判断し、必要な調査・実行・修正・検証まで自律的に進める。
+- 着手前に対象ドキュメント、単位、構成、未保存変更を確認する。設計を左右する不明点は確認し、通常の操作や配置は判断して進める。
+- 対象外の形状、既存ファイル、ユーザーの未保存変更を保護する。既存CADファイルの上書きにはユーザーの明示的な指示を必要とし、CLIでは `--overwrite` を指定する。
+- フィーチャー操作後は再構築し、実際の形状と要求への適合を確認する。エラーは現状を調べて修正し、APIの成功応答だけで完了としない。
+- 保存・出力結果を確認する。最終CAD成果物は開いたままにし、自分で開いた入力・中間・失敗試行のドキュメントは閉じる。作業前から開かれていたドキュメントを保護し、閉じることを理由にディスク上のファイルを削除しない。
+- 完了時は保存先と確認結果を簡潔に伝える。未検証・未解決の事項は明示する。
+
+## アプリを拡張する場合
+
+- SOLIDWORKSのCOM呼び出しは `src/SolidWorksAgent.SwApi` に置く。
+- 外部に公開する寸法はmmとし、mへの変換はCOMとの境界で行う。
+- CLIは適用可能な箇所で機械可読のJSON出力に対応する。
