@@ -45,8 +45,12 @@ public sealed class SettingsDialog : Form
             var browse = new Button { Text = "参照", AutoSize = true };
             browse.Click += (_, _) =>
             {
-                if (folder) { using var d = new FolderBrowserDialog(); if (d.ShowDialog(this) == DialogResult.OK) field.Text = d.SelectedPath; }
-                else { using var d = new OpenFileDialog { Filter = "実行ファイル|*.exe;*.js;*.mjs;*.cmd|すべて|*.*" }; if (d.ShowDialog(this) == DialogResult.OK) field.Text = d.FileName; }
+                try
+                {
+                    if (folder) { using var d = new FolderBrowserDialog(); if (d.ShowDialog(this) == DialogResult.OK) field.Text = d.SelectedPath; }
+                    else { using var d = new OpenFileDialog { Filter = "実行ファイル|*.exe;*.js;*.mjs;*.cmd|すべて|*.*" }; if (d.ShowDialog(this) == DialogResult.OK) field.Text = d.FileName; }
+                }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "ファイル選択エラー", MessageBoxButtons.OK, MessageBoxIcon.Information); }
             };
             grid.Controls.Add(browse, 2, row);
         }

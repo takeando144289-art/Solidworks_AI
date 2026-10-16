@@ -68,7 +68,7 @@ Use current CLI versions supporting the flags below. This application does not
 install or sign in to vendor accounts automatically. Service availability and
 billing follow the account used by each CLI. No credentials are stored by this app.
 
-Open **⋯ > 接続設定…** to set:
+Open **設定** to set:
 
 - 作業フォルダー: the existing SolidWorksAgent project (the build package supplies its default).
 - swagent.exe: `artifacts\chat-addin\cli\swagent.exe`.
@@ -76,11 +76,11 @@ Open **⋯ > 接続設定…** to set:
   Standard npm `.cmd` shims resolve to known JavaScript entry points without a shell.
 - Node.js: `node.exe` or its full path when using npm-installed CLIs.
 
-Per-provider model names are editable under **⋯ > モデル…**. Empty uses the vendor default.
+Per-provider model names are editable under **モデル選択**. Empty uses the vendor default.
 Codex uses a persistent app-server thread while the pane is open. Claude/Gemini use
 native CLI session IDs for subsequent messages. Switching providers keeps their sessions
 separate; the UI transcript is shared visually but another provider does not inherit a
-private vendor session. **⋯ > 新しい会話** starts fresh sessions. Closing SOLIDWORKS
+private vendor session. **新しいチャット** starts fresh sessions. Closing SOLIDWORKS
 ends the pane connection; automatic transcript restoration after restart is not implemented.
 Settings remain in `%LOCALAPPDATA%\SolidWorksAgent\chat-settings.json`.
 Native agents can read project files and use tools under their own permission policies;
@@ -202,7 +202,7 @@ it does not close CAD documents. A loaded .NET assembly may remain cached until
 SOLIDWORKS exits, so an in-process update can still require a restart.
 
 Enter sends a message; Shift+Enter inserts a newline. Provider selection stays in the
-compact header. Connection settings, model and new conversation are under the ⋯ menu.
+compact header. The **設定**, **モデル選択** and **新しいチャット** buttons are always visible above the conversation, beneath the provider selector.
 
 For an end-to-end connection check through the loaded pane, run
 `swagent chat check-connection --solidworks-pid <pid> --json`. This submits a
@@ -305,3 +305,29 @@ then requested escalation, passed automatic review and returned exit code 0 with
 `connected: true`. The client received zero manual approval requests. This test only
 connected; it did not read or modify CAD documents. The updated package is
 `artifacts\chat-auto-review`, reusing the complete runtime in `artifacts\chat-native\tools`.
+
+## Settings controls and error handling (2026-10-16)
+
+The popup menu has been removed. Three buttons at the top of the pane open settings,
+select a model, or start a new chat. They stay inside the pane, avoiding the popup
+placement problem on multiple monitors. All three are disabled during an active turn.
+Settings callbacks catch and log failures in `addin.log` and report them in chat;
+model selection is saved when the dialog is accepted. File-picker failures are
+reported in the settings dialog.
+
+The former menu disposed itself in `Closed`, while WinForms was still handling its
+visibility/click events. An isolated build of that implementation reproduced
+`ObjectDisposedException` from `ToolStripDropDown.SetVisibleCore` on closure.
+Removing the popup also removes that lifecycle problem.
+
+The 11 UI workflow checks pass under both `Application.Run` and a native Win32
+message loop. They cover model selection, connection-settings cancellation, session
+reset and recovery from an asynchronous settings error, alongside existing chat
+workflows. The build completed without warnings/errors, and a rendered preview
+confirmed the three buttons. Actual SOLIDWORKS clicks were not automated because
+the desktop automation tool could not initialize with this WSL workspace path.
+
+The UI update uses the existing V7 identity. Replace the UI DLL/PDB in the registered
+`artifacts\chat-auto-review\addin` package while SOLIDWORKS is closed, keeping a backup
+of the previous files. No COM re-registration is required. Restart SOLIDWORKS to load
+the update.
