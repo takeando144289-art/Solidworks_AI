@@ -12,11 +12,11 @@ public sealed class ChatPanel : UserControl
     private readonly Dictionary<AiProvider, IAgentSession> _sessions = [];
     private IAgentSession? _activeSession;
     private TaskCompletionSource<string>? _answer;
-    private readonly Dictionary<string, string> _streamed = [];
-    private string? _streamItem;
+    private readonly Dictionary<string, MessageBubble> _streamed = [];
+    private readonly IChatNotifier? _notifier;
     private readonly ComboBox _choice = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
     private readonly TextBox _model = new() { PlaceholderText = "既定のモデル", Dock = DockStyle.Fill };
-    private readonly RichTextBox _conversation = new() { ReadOnly = true, Dock = DockStyle.Fill, BackColor = Color.White, BorderStyle = BorderStyle.None, DetectUrls = false };
+    private readonly ConversationView _conversation = new();
     private readonly ChatInputBox _input = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "例：直径30 mm、長さ20 mmの円柱を作って" };
     private readonly Button _send = new() { Text = "送信", AutoSize = true };
     private readonly Button _cancel = new() { Text = "停止", AutoSize = true, Enabled = false };
@@ -31,11 +31,16 @@ public sealed class ChatPanel : UserControl
     private readonly RowStyle _attachmentRow = new(SizeType.Absolute, 0);
     private readonly Button _attach = new() { Text = "＋ 添付", AutoSize = true };
 
+    // Preserve the constructor signature used by already installed COM add-ins.
     public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory = null)
+        : this(solidWorksPid, sessionFactory, null) { }
+
+    public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory, IChatNotifier? notifier)
     {
         _solidWorksPid = solidWorksPid;
         _sessionFactory = sessionFactory ?? AgentSession.Create;
         _testing = sessionFactory is not null;
+        _notifier = notifier ?? (_testing ? null : new ChatNotifier(solidWorksPid > 0 ? solidWorksPid : Environment.ProcessId, () => { if (!IsDisposed) _input.Focus(); }));
         string? settingsError = null;
         try { _settings = ChatSettings.Load(); }
         catch (Exception ex) { _settings = new(); settingsError = ex.Message; }
@@ -117,6 +122,7 @@ public sealed class ChatPanel : UserControl
             }
             catch (Exception ex) { Append("添付エラー", ex.Message); }
         };
+        _conversation.MessageAdded += RegisterDropTarget;
         RegisterDropTarget(this);
         Append("案内", "選んだAIと直接やり取りできます。調査・操作・修正はAI自身が進めます。停止するときは「やめて」と入力してください。\nEnterで送信、Shift+Enterで改行。画像やファイルをドロップ、または「＋ 添付」で追加できます。");
         _cancel.Visible = false; _status.Text = "";
@@ -191,7 +197,7 @@ public sealed class ChatPanel : UserControl
         }
     }
 
-    public object Status => new { Busy = _busy, PendingOperations = 0, Conversation = _conversation.Text };
+    public object Status => new { Busy = _busy, PendingOperations = 0, Conversation = _conversation.TranscriptText };
     public bool BeginConnectionCheck()
     {
         // Exercise the same chat path as a typed request without replacing a draft.
@@ -210,29 +216,28 @@ public sealed class ChatPanel : UserControl
     }
     private void Append(string role, string text)
     {
-        if (IsDisposed) return;
-        _conversation.SelectionStart = _conversation.TextLength;
-        _conversation.SelectionColor = role == "あなた" ? Color.FromArgb(37, 99, 235) : Color.FromArgb(15, 23, 42);
-        _conversation.AppendText($"{role}\n{text}\n\n"); _conversation.ScrollToCaret();
+        if (!IsDisposed) _conversation.AddMessage(role, text);
+    }
+    private void Notify(ChatNotification notification)
+    {
+        if (IsDisposed || Disposing) return;
+        // A Windows notification failure must never escape into the native CAD host.
+        try { _notifier?.Notify(notification, _settings.Provider.ToString()); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine("Chat notification: " + ex.Message); }
     }
     private void Display(AgentEvent item)
     {
         if (IsDisposed) return;
         if (InvokeRequired) { BeginInvoke(() => Display(item)); return; }
         if (item.Kind == "status") { _status.Text = item.Text; return; }
+        if (item.Kind is not ("delta" or "message")) return;
         var id = item.ItemId ?? Guid.NewGuid().ToString();
-        if (item.Kind == "delta")
+        if (!_streamed.TryGetValue(id, out var bubble))
         {
-            if (_streamItem != id) { Append(_settings.Provider.ToString(), ""); _streamItem = id; }
-            _conversation.AppendText(item.Text); _conversation.ScrollToCaret();
-            _streamed[id] = _streamed.GetValueOrDefault(id, "") + item.Text;
+            bubble = _conversation.AddMessage(_settings.Provider.ToString(), item.Text);
+            _streamed[id] = bubble;
         }
-        else if (item.Kind == "message")
-        {
-            if (!_streamed.ContainsKey(id)) Append(_settings.Provider.ToString(), item.Text);
-            else _conversation.AppendText("\n\n");
-            _streamItem = null;
-        }
+        else _conversation.UpdateMessage(bubble, item.Kind == "delta" ? bubble.MessageText + item.Text : item.Text);
     }
 
     private async Task<string> AskAsync(AgentQuestion question, CancellationToken token)
@@ -240,10 +245,11 @@ public sealed class ChatPanel : UserControl
         var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
         {
-            if (IsDisposed) { completion.TrySetCanceled(); return; }
+            if (IsDisposed || token.IsCancellationRequested) { completion.TrySetCanceled(); return; }
             _answer = completion;
             Append(_settings.Provider.ToString(), question.Text + (question.Options.Length > 0 ? "\n" + string.Join(" / ", question.Options) : ""));
             _status.Text = "AIからの確認に、このチャットで返信してください";
+            Notify(ChatNotification.ReplyRequired);
         }
         if (InvokeRequired) BeginInvoke(Show); else Show();
         try { return await completion.Task.WaitAsync(token); }
@@ -259,7 +265,7 @@ public sealed class ChatPanel : UserControl
             if (ChatIntents.Parse(prompt) == ChatIntent.Cancel)
             { _input.Clear(); Append("あなた", prompt); _request?.Cancel(); _status.Text = "AIに停止を要求しています…"; }
             else if (_answer is not null)
-            { _input.Clear(); Append("あなた", prompt); _answer.TrySetResult(prompt.Trim()); }
+            { _input.Clear(); Append("あなた", prompt); _answer.TrySetResult(prompt.Trim()); _answer = null; _status.Text = "AIが応答を続けています…"; }
             else if (_activeSession is not null)
             {
                 try { await _activeSession.SteerAsync(prompt, _request!.Token); _input.Clear(); Append("あなた", prompt); }
@@ -273,7 +279,7 @@ public sealed class ChatPanel : UserControl
         _input.Clear(); _attachments.Clear(); RefreshAttachments();
         Append("あなた", prompt + (attached.Length == 0 ? "" : "\n添付：" + string.Join("、", attached.Select(a => a.Name))));
         if (ChatIntents.Parse(prompt) == ChatIntent.Cancel) { _status.Text = "実行中の処理はありません"; return; }
-        Busy(true); _request = new CancellationTokenSource(); _streamed.Clear(); _streamItem = null;
+        Busy(true); _request = new CancellationTokenSource(); _streamed.Clear();
         try
         {
             _settings.Providers[_settings.Provider].Model = _model.Text.Trim();
@@ -283,7 +289,8 @@ public sealed class ChatPanel : UserControl
             _activeSession = session;
             _status.Text = _settings.Provider + " に送信しています…";
             await session.SendAsync(message, Display, AskAsync, _request.Token);
-            if (!IsDisposed) _status.Text = "";
+            _request.Token.ThrowIfCancellationRequested();
+            if (!IsDisposed) { _status.Text = "応答が完了しました"; Notify(ChatNotification.Completed); }
         }
         catch (OperationCanceledException) { if (!IsDisposed) _status.Text = "停止しました"; }
         catch (Exception ex)
@@ -292,6 +299,7 @@ public sealed class ChatPanel : UserControl
             if (!IsDisposed)
             {
                 _status.Text = "AI接続を確認してください";
+                Notify(ChatNotification.Failed);
                 if (attached.Length > 0)
                 {
                     _attachments.AddRange(attached); RefreshAttachments();
@@ -316,7 +324,7 @@ public sealed class ChatPanel : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _request?.Cancel(); _ = DisposeSessionsAsync(); _model.Dispose(); }
+        if (disposing) { _request?.Cancel(); _ = DisposeSessionsAsync(); _model.Dispose(); _notifier?.Dispose(); }
         base.Dispose(disposing);
     }
 }

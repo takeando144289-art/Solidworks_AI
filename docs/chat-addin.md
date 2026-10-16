@@ -204,6 +204,16 @@ SOLIDWORKS exits, so an in-process update can still require a restart.
 Enter sends a message; Shift+Enter inserts a newline. Provider selection stays in the
 compact header. The **設定**, **モデル選択** and **新しいチャット** buttons are always visible above the conversation, beneath the provider selector.
 
+User instructions appear in right-aligned, tinted bordered bubbles; AI messages appear on the left.
+Speaker names are hidden; position and background color distinguish the messages.
+Message text remains selectable, including while responses stream.
+Windows notifications announce a completed AI response or a request for the user's reply.
+Connection failures also notify; progress updates and user-cancelled turns do not.
+Click the notification (or double-click the SolidWorks AI Chat tray icon) to return to SOLIDWORKS.
+Notifications contain no CAD filenames or message contents. Windows notification settings and
+Do Not Disturb can suppress them. Completion means the AI response has ended; inspect the
+response for the actual CAD result. The notification icon is removed when the chat pane closes.
+
 For an end-to-end connection check through the loaded pane, run
 `swagent chat check-connection --solidworks-pid <pid> --json`. This submits a
 connection-only message through the same UI handler; it refuses to replace a draft,

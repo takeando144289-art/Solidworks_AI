@@ -23,6 +23,7 @@ internal static class Program
             {
                 using var f = new Fixture(window);
                 await f.Send("  この部品の図面を作って\n寸法も入れて。  ");
+                Check(typeof(ChatPanel).GetConstructor([typeof(int), typeof(Func<ChatSettings, int, IAgentSession>)]) is not null);
                 Check(f.Session.Messages.Single() == "  この部品の図面を作って\n寸法も入れて。  ");
                 Check(f.Text.Contains("native reply") && !f.Text.Contains("よければ「実行して」"));
             });
@@ -184,6 +185,123 @@ internal static class Program
                 await f.DropFiles(files.Source); f.Field<Button>("_newChat").PerformClick(); await Task.Yield();
                 Check(f.Field<List<ChatAttachment>>("_attachments").Count == 0);
             });
+            await Test("User bubbles align right and assistant text remains left at narrow and wide sizes", async () =>
+            {
+                using var f = new Fixture(window);
+                await f.Send("プレートを作って\n幅150 mm、高さ20 mmです。");
+                var conversation = f.Field<ConversationView>("_conversation");
+                foreach (var width in new[] { 320, 620 })
+                {
+                    window.Width = width; await Task.Yield();
+                    var bubbles = conversation.Controls.OfType<MessageBubble>().ToArray();
+                    var user = bubbles.Single(x => x.IsUser); var ai = bubbles.Last();
+                    Check(user.Left > ai.Left && user.Right <= conversation.ClientSize.Width);
+                    Check(user.BackColor != ai.BackColor && user.MessageText.Contains("幅150 mm"));
+                    Check(user.Controls.OfType<Label>().All(x => !x.Visible) && ai.Controls.OfType<Label>().All(x => !x.Visible));
+                    Check(bubbles.Zip(bubbles.Skip(1)).All(x => x.First.Bottom < x.Second.Top));
+                }
+                window.Width = 420;
+            });
+            await Test("Long wrapped text expands, remains selectable and shrinks after widening", async () =>
+            {
+                using var f = new Fixture(window);
+                var conversation = f.Field<ConversationView>("_conversation");
+                var text = string.Concat(Enumerable.Repeat("長い指示：寸法を入れてスケッチを完全定義してください。", 30));
+                var bubble = conversation.AddMessage("あなた", text);
+                window.Width = 320; await Task.Yield(); var narrow = bubble.Height;
+                window.Width = 620; await Task.Yield(); Check(bubble.Height < narrow);
+                var body = bubble.Controls.OfType<RichTextBox>().Single(); body.SelectAll();
+                Check(body.SelectedText == text && body.ReadOnly);
+                // RichEdit reports the actual final line position; all text must fit without an inner scrollbar.
+                var last = body.GetPositionFromCharIndex(body.TextLength - 1);
+                Check(last.Y + body.Font.Height <= body.ClientSize.Height && body.GetPositionFromCharIndex(0).Y >= 0);
+                window.Width = 420;
+            });
+            await Test("Mouse wheel over message text scrolls history and streaming preserves reading position", async () =>
+            {
+                using var f = new Fixture(window); var conversation = f.Field<ConversationView>("_conversation"); conversation.Clear();
+                MessageBubble? last = null;
+                for (var i = 0; i < 20; i++) last = conversation.AddMessage("Codex", "過去の返答 " + i + "\n寸法と拘束を確認しました。");
+                var body = last!.Controls.OfType<RichTextBox>().Single(); var before = conversation.VerticalScroll.Value;
+                SendMessage(body.Handle, 0x020A, 120 << 16, 0); await Task.Yield();
+                Check(conversation.VerticalScroll.Value < before);
+                conversation.AutoScrollPosition = new Point(0, 100); var reading = conversation.VerticalScroll.Value;
+                conversation.UpdateMessage(last, last.MessageText + "\n追加の出力です。");
+                Check(conversation.VerticalScroll.Value == reading);
+            });
+            await Test("Interleaved stream items keep their own bubbles and final content", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Session.Run = (_, display, _, _) =>
+                {
+                    display(new("delta", "前", "one")); display(new("delta", "別の返答", "two"));
+                    display(new("delta", "後", "one")); display(new("message", "前後（確定）", "one"));
+                    return Task.CompletedTask;
+                };
+                await f.Send("確認して");
+                var bubbles = f.Field<ConversationView>("_conversation").Controls.OfType<MessageBubble>().ToArray();
+                Check(bubbles.Count(x => x.MessageText == "前後（確定）") == 1);
+                Check(bubbles.Count(x => x.MessageText == "別の返答") == 1);
+            });
+            await Test("Completion notifies once per turn, never for progress or stream chunks", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Session.Run = (_, display, _, _) =>
+                {
+                    display(new("status", "実行中")); display(new("delta", "でき", "one"));
+                    display(new("delta", "ました", "one")); display(new("message", "できました", "one"));
+                    Check(f.Notifier.Notifications.Count == 0); return Task.CompletedTask;
+                };
+                await f.Send("作って"); Check(f.Notifier.Notifications.SequenceEqual(new[] { ChatNotification.Completed }));
+            });
+            await Test("Reply notification comes before waiting, completion only after the answer", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Session.Run = async (_, _, ask, token) => { await ask(new("穴径は？", []), token); };
+                var task = f.Send("穴を追加して");
+                Check(f.Notifier.Notifications.SequenceEqual(new[] { ChatNotification.ReplyRequired }));
+                await f.Send("3 mm"); await task;
+                Check(f.Notifier.Notifications.SequenceEqual(new[] { ChatNotification.ReplyRequired, ChatNotification.Completed }));
+            });
+            await Test("Cancelled and failed turns never announce successful completion", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Session.Run = (_, _, _, token) => Task.Delay(Timeout.Infinite, token);
+                var task = f.Send("作って"); await f.Send("やめて"); await task;
+                Check(f.Notifier.Notifications.Count == 0);
+                f.Session.Run = (_, _, _, _) => throw new IOException("fixture connection error");
+                await f.Send("再試行"); Check(f.Notifier.Notifications.SequenceEqual(new[] { ChatNotification.Failed }));
+            });
+            await Test("Notification failure cannot break chat, and disposal releases notifier", async () =>
+            {
+                var f = new Fixture(window); f.Notifier.ThrowOnNotify = true;
+                await f.Send("通知失敗時"); Check(f.Text.Contains("native reply") && !f.Text.Contains("接続エラー"));
+                f.Dispose(); Check(f.Notifier.Disposed);
+            });
+            if (args.Contains("--notification-smoke"))
+            {
+                await Test("Windows notification lifecycle works under the native host", async () =>
+                {
+                    using var notifier = new ChatNotifier(Environment.ProcessId, () => { });
+                    notifier.Notify(ChatNotification.Completed, "通知テスト");
+                    await Task.Delay(1000);
+                });
+            }
+            var screenshotIndex = Array.IndexOf(args, "--screenshot");
+            if (screenshotIndex >= 0 && screenshotIndex + 1 < args.Length)
+            {
+                using var f = new Fixture(window); window.Size = new(480, 850);
+                var conversation = f.Field<ConversationView>("_conversation"); conversation.Clear();
+                conversation.AddMessage("あなた", "この図面をモデル化してください。\n縦20 × 横150 × 厚さ3 mm、四隅はR5にしたいです。\n添付：プレート図面.png");
+                conversation.AddMessage("Codex", "図面を確認しました。プレートを作成し、四隅にR5のフィレットを追加します。\n\nスケッチには寸法と拘束を追加して、完全定義されていることを確認します。");
+                conversation.AddMessage("あなた", "ねじ穴も追加してください。10 mm間隔でお願いします。");
+                conversation.AddMessage("Codex", "ねじ穴の配置を確認します。\n穴の呼び径と、端から最初の穴までの距離を教えてください。");
+                f.Field<Label>("_status").Text = "AIからの確認に、このチャットで返信してください";
+                window.Refresh();
+                using var bitmap = new Bitmap(f.Panel.Width, f.Panel.Height);
+                f.Panel.DrawToBitmap(bitmap, f.Panel.ClientRectangle);
+                bitmap.Save(Path.GetFullPath(args[screenshotIndex + 1]), System.Drawing.Imaging.ImageFormat.Png);
+            }
             Console.WriteLine($"{count - failures}/{count} UI workflow checks passed"); window.Close();
         };
         if (args.Contains("--native-host"))
@@ -215,9 +333,10 @@ internal static class Program
         public ChatPanel Panel { get; }
         public FakeSession Session { get; } = new();
         public int Creations;
+        public FakeNotifier Notifier { get; } = new();
         public Fixture(Form form)
         {
-            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; });
+            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; }, Notifier);
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         public T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;
@@ -265,7 +384,7 @@ internal static class Program
             if (error is not null) throw error;
             Check(seen);
         }
-        public string Text => Field<RichTextBox>("_conversation").Text;
+        public string Text => Field<ConversationView>("_conversation").TranscriptText;
         public async Task Send(string value)
         {
             Field<TextBox>("_input").Text = value;
@@ -283,6 +402,17 @@ internal static class Program
             fixture.Field<ChatSettings>("_settings").ProjectDirectory = _root;
         }
         public void Dispose() => Directory.Delete(_root, true);
+    }
+    sealed class FakeNotifier : IChatNotifier
+    {
+        public List<ChatNotification> Notifications { get; } = [];
+        public bool ThrowOnNotify, Disposed;
+        public void Notify(ChatNotification notification, string provider)
+        {
+            if (ThrowOnNotify) throw new InvalidOperationException("fixture notification failure");
+            Notifications.Add(notification);
+        }
+        public void Dispose() => Disposed = true;
     }
     sealed class FakeSession : IAgentSession
     {
