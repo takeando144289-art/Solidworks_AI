@@ -36,7 +36,12 @@ public static class AgentSession
         Decide how to inspect, execute, verify and recover using your own agent workflow. The pane only relays messages and tools.
         Follow AGENTS.md for per-request output versioning. Its standing permission allows --overwrite for working files
         created by the current unfinished request; reuse that version and path throughout trials, repairs and re-exports.
-        After completion, a new modification request gets the next unused version; copy before editing, preserving prior versions.
+        After completion, version only the artifact being modified; copy before editing, preserving prior versions.
+        Keep model versions and drawing revisions separate: model Name_v002.sldprt -> drawing Name_v002_d001.slddrw;
+        drawing-only edits -> Name_v002_d002.slddrw, still referencing the unchanged model v002. Do not copy or version that model.
+        When switching to a new model version, start its drawing at d001, or the next unused drawing revision if any already exist.
+        Verify actual model/configuration references, not just filenames. Match PDF/export names to their drawing revision.
+        Preserve legacy drawings; save revisions under the separate model/drawing naming policy in AGENTS.md.
         Clarification replies, retries, inspection and explanation alone do not advance versions.
         Protect user originals and unsaved changes. Overwriting originals or completed versions requires separate explicit permission.
         Clean up only this request's own unnecessary temporary files after verification; preserve required CAD references and prior files.

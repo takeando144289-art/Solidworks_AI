@@ -218,9 +218,15 @@ default/manual selection. No API key or WSL configuration change is required.
 
 Output versioning follows `AGENTS.md`: use one version/path during a request, with
 standing overwrite permission only for that request's own working files. After completion,
-a new modification request starts the next unused version, preserving completed outputs
-and user originals. Retries, clarification answers and read-only requests do not increment
-versions. Keep CAD references intact; clean up only unnecessary temporary files created
+a new modification request starts the next unused version of the modified artifact, preserving
+completed outputs and user originals. Model versions and drawing revisions are independent:
+`Part_v002.sldprt` -> `Part_v002_d001.slddrw` -> drawing-only edit `Part_v002_d002.slddrw`.
+Both drawings reference the unchanged model v002. A first drawing for model v003 starts at
+`Part_v003_d001.slddrw`; if that model version already has drawings, use the next unused
+revision. Verify actual model/configuration references, and give PDF exports the drawing's
+stem. Preserve legacy drawings; when their revision history is unknown, save the edited
+copy with the actual model version and the first unused d-number starting at d001.
+Retries, clarification answers and read-only requests do not increment versions. Keep CAD references intact; clean up only unnecessary temporary files created
 by the current request after verification. The agent applies this policy using its native
 tools; the chat host does not add a versioning or deletion control loop.
 
