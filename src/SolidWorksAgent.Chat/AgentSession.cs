@@ -8,6 +8,8 @@ public sealed record AgentQuestion(string Text, string[] Options);
 /// <summary>A transport to the vendor's own agent runtime, not an application planning loop.</summary>
 public interface IAgentSession : IAsyncDisposable
 {
+    string? SessionId => null;
+    void RestoreSession(string id) => throw new NotSupportedException("このAIでは会話を再開できません。");
     Task SteerAsync(string message, CancellationToken token);
     Task SteerAsync(AgentMessage message, CancellationToken token) => SteerAsync(message.ToPrompt(), token);
     Task SendAsync(AgentMessage message, Action<AgentEvent> display,

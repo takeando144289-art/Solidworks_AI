@@ -5,6 +5,11 @@ namespace SolidWorksAgent.ChatUi;
 
 public sealed class ChatPanel : UserControl
 {
+    private ChatHistoryStore? _historyStore;
+    private ChatRecord _chat = new();
+    private bool _historyDirty, _restoring, _switching;
+    private readonly System.Windows.Forms.Timer _historyTimer = new() { Interval = 1000 };
+    private readonly Button _history = new() { Text = "履歴", Dock = DockStyle.Fill };
     private readonly int _solidWorksPid;
     private ChatSettings _settings;
     private readonly Func<ChatSettings, int, IAgentSession> _sessionFactory;
@@ -41,6 +46,10 @@ public sealed class ChatPanel : UserControl
 
     public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory, IChatNotifier? notifier,
         Func<ChatSettings, CancellationToken, Task<IReadOnlyList<AgentModel>>> modelLoader)
+        : this(solidWorksPid, sessionFactory, notifier, modelLoader, null) { }
+
+    public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory, IChatNotifier? notifier,
+        Func<ChatSettings, CancellationToken, Task<IReadOnlyList<AgentModel>>> modelLoader, ChatHistoryStore? historyStore)
     {
         _modelLoader = modelLoader;
         _solidWorksPid = solidWorksPid;
@@ -50,6 +59,9 @@ public sealed class ChatPanel : UserControl
         string? settingsError = null;
         try { _settings = ChatSettings.Load(); }
         catch (Exception ex) { _settings = new(); settingsError = ex.Message; }
+        try { _historyStore = historyStore ?? (_testing || string.IsNullOrWhiteSpace(_settings.ProjectDirectory) ? null : ChatHistoryStore.ForProject(_settings.ProjectDirectory)); }
+        catch (Exception ex) { settingsError = "履歴の保存先を確認してください: " + ex.Message; }
+        _historyTimer.Tick += (_, _) => SaveHistorySafely();
         Dock = DockStyle.Fill;
         Font = new Font("Yu Gothic UI", 9F);
         BackColor = Color.White;
@@ -59,9 +71,9 @@ public sealed class ChatPanel : UserControl
         foreach (var height in new[] { 36F, 34F, -1F, 24F, 80F, 38F })
             layout.RowStyles.Add(height < 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.RowStyles.Insert(4, _attachmentRow);
-        var top = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        top.Controls.Add(_choice, 0, 0); top.Controls.Add(new Label { Text = "SolidWorks", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
+        var top = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        top.Controls.Add(_choice, 0, 0); top.Controls.Add(new Label { Text = "SolidWorks", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0); top.Controls.Add(_history, 2, 0);
         var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 0, 0, 4) };
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
@@ -84,6 +96,7 @@ public sealed class ChatPanel : UserControl
             if (_choice.SelectedItem is not AiProvider provider) return;
             _settings.Provider = provider;
             _model.Text = _settings.Providers[_settings.Provider].Model;
+            MarkHistoryDirty();
         };
         _send.Click += async (_, _) => await SendAsync();
         _cancel.Click += (_, _) => { _request?.Cancel(); _status.Text = "停止要求済み。CAD操作中は保存・整理の完了を待ちます。"; };
@@ -91,11 +104,19 @@ public sealed class ChatPanel : UserControl
         {
             using var dialog = new SettingsDialog(_settings);
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            SaveHistory();
             await ResetSessionsAsync();
+            var changedProject = !string.Equals(_settings.ProjectDirectory.TrimEnd('\\', '/'), dialog.Settings.ProjectDirectory.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
             // Update the selection against the old settings before replacing them.
             _choice.SelectedItem = dialog.Settings.Provider;
             _settings = dialog.Settings;
             _model.Text = _settings.Providers[_settings.Provider].Model;
+            if (changedProject)
+            {
+                _historyStore = _testing ? null : ChatHistoryStore.ForProject(_settings.ProjectDirectory);
+                _chat = new(); _conversation.Clear(); _input.Clear(); _attachments.Clear(); RefreshAttachments();
+            }
+            MarkHistoryDirty();
         });
         _selectModel.Click += async (_, _) => await RunSettingsActionAsync(() =>
         {
@@ -108,14 +129,27 @@ public sealed class ChatPanel : UserControl
                 options.Model = dialog.SelectedModel;
                 try { if (!_testing) _settings.Save(); }
                 catch { options.Model = previous; throw; }
-                _model.Text = options.Model;
+                _model.Text = options.Model; MarkHistoryDirty();
             }
             return Task.CompletedTask;
         });
         _newChat.Click += async (_, _) => await RunSettingsActionAsync(async () =>
         {
-            await ResetSessionsAsync(); _attachments.Clear(); RefreshAttachments(); _conversation.Clear(); Append("案内", "新しい会話を開始しました。");
+            SaveHistory();
+            await ResetSessionsAsync(); _chat = new(); _input.Clear(); _attachments.Clear(); RefreshAttachments(); _conversation.Clear(); Append("案内", "新しい会話を開始しました。");
         });
+        _history.Click += async (_, _) => await RunSettingsActionAsync(async () =>
+        {
+            SaveHistory();
+            var store = _historyStore; var project = _settings.ProjectDirectory;
+            using var dialog = new ChatHistoryDialog(store?.List() ?? [], _chat.Id, store is null ? null : token => Task.Run(() =>
+            {
+                NativeHistoryImport.Import(store, project, token);
+                return store.List();
+            }, token));
+            if (dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedChatId is { } id) await OpenChatAsync(id);
+        });
+        _input.TextChanged += (_, _) => MarkHistoryDirty();
         _input.SubmitRequested += async (_, _) => await SendAsync();
         _attach.Click += async (_, _) =>
         {
@@ -133,6 +167,9 @@ public sealed class ChatPanel : UserControl
         _cancel.Visible = false; _status.Text = "";
         if (settingsError is not null) Append("設定エラー", settingsError);
         if (solidWorksPid <= 0) Append("プレビュー", "SolidWorksに接続していません。アドインとして開くとCAD操作を利用できます。");
+        try { if (_historyStore?.List().FirstOrDefault() is { } latest) RestoreChat(latest); }
+        catch (Exception ex) { Append("履歴エラー", ex.Message); }
+
     }
 
     private void RegisterDropTarget(Control control)
@@ -142,7 +179,7 @@ public sealed class ChatPanel : UserControl
         {
             try
             {
-                e.Effect = !_busy && !_importing && e.Data?.GetDataPresent(DataFormats.FileDrop) == true
+                e.Effect = !_busy && !_importing && !_switching && e.Data?.GetDataPresent(DataFormats.FileDrop) == true
                     && (e.AllowedEffect & DragDropEffects.Copy) != 0 ? DragDropEffects.Copy : DragDropEffects.None;
             }
             catch (Exception) { e.Effect = DragDropEffects.None; }
@@ -157,7 +194,7 @@ public sealed class ChatPanel : UserControl
 
     private async Task AddAttachmentsAsync(string[] paths)
     {
-        if (_busy || _importing || IsDisposed) return;
+        if (_busy || _importing || _switching || IsDisposed) return;
         _importing = true; Busy(_busy); _status.Text = "添付ファイルを読み込んでいます…";
         try
         {
@@ -182,11 +219,13 @@ public sealed class ChatPanel : UserControl
         }
         _attachmentList.Visible = _attachments.Count > 0;
         _attachmentRow.Height = _attachments.Count > 0 ? 58 : 0;
+        MarkHistoryDirty();
     }
 
     private async Task RunSettingsActionAsync(Func<Task> action)
     {
-        if (IsDisposed || Disposing || _busy || _importing) return;
+        if (IsDisposed || Disposing || _busy || _importing || _switching) return;
+        _switching = true; Busy(_busy);
         try { await action(); }
         catch (Exception ex)
         {
@@ -200,6 +239,7 @@ public sealed class ChatPanel : UserControl
             catch (IOException) { } catch (UnauthorizedAccessException) { }
             if (!IsDisposed && !Disposing) Append("設定エラー", ex.Message);
         }
+        finally { _switching = false; Busy(_busy); }
     }
 
     public object Status => new { Busy = _busy, PendingOperations = 0, Conversation = _conversation.TranscriptText };
@@ -215,13 +255,13 @@ public sealed class ChatPanel : UserControl
     {
         if (IsDisposed) return;
         _busy = value;
-        var editable = !value && !_importing;
-        _choice.Enabled = _configure.Enabled = _model.Enabled = _selectModel.Enabled = _newChat.Enabled = _attach.Enabled = _attachmentList.Enabled = editable;
-        _cancel.Visible = value; _cancel.Enabled = value; _send.Enabled = !_importing;
+        var editable = !value && !_importing && !_switching;
+        _choice.Enabled = _configure.Enabled = _model.Enabled = _selectModel.Enabled = _newChat.Enabled = _history.Enabled = _attach.Enabled = _attachmentList.Enabled = editable;
+        _cancel.Visible = value; _cancel.Enabled = value; _send.Enabled = !_importing && !_switching;
     }
     private void Append(string role, string text)
     {
-        if (!IsDisposed) _conversation.AddMessage(role, text);
+        if (!IsDisposed) { _conversation.AddMessage(role, text); MarkHistoryDirty(); }
     }
     private void Notify(ChatNotification notification)
     {
@@ -234,6 +274,8 @@ public sealed class ChatPanel : UserControl
     {
         if (IsDisposed) return;
         if (InvokeRequired) { BeginInvoke(() => Display(item)); return; }
+        if (item.Kind == "session")
+        { _chat.Sessions[_settings.Provider] = item.Text; MarkHistoryDirty(); SaveHistorySafely(); return; }
         if (item.Kind == "status") { _status.Text = item.Text; return; }
         if (item.Kind is not ("delta" or "message")) return;
         var id = item.ItemId ?? Guid.NewGuid().ToString();
@@ -243,6 +285,7 @@ public sealed class ChatPanel : UserControl
             _streamed[id] = bubble;
         }
         else _conversation.UpdateMessage(bubble, item.Kind == "delta" ? bubble.MessageText + item.Text : item.Text);
+        MarkHistoryDirty();
     }
 
     private async Task<string> AskAsync(AgentQuestion question, CancellationToken token)
@@ -263,7 +306,7 @@ public sealed class ChatPanel : UserControl
 
     private async Task SendAsync()
     {
-        if (_importing || (string.IsNullOrWhiteSpace(_input.Text) && _attachments.Count == 0)) return;
+        if (_switching || _importing || (string.IsNullOrWhiteSpace(_input.Text) && _attachments.Count == 0)) return;
         var prompt = _input.Text; // User text is forwarded verbatim; the pane never converts it into a plan.
         if (_busy)
         {
@@ -289,8 +332,13 @@ public sealed class ChatPanel : UserControl
         {
             _settings.Providers[_settings.Provider].Model = _model.Text.Trim();
             if (!_testing) _settings.Save();
+            SaveHistory();
             if (!_sessions.TryGetValue(_settings.Provider, out var session))
-            { session = _sessionFactory(_settings, _solidWorksPid); _sessions[_settings.Provider] = session; }
+            {
+                session = _sessionFactory(_settings, _solidWorksPid);
+                if (_chat.Sessions.TryGetValue(_settings.Provider, out var id)) session.RestoreSession(id);
+                _sessions[_settings.Provider] = session;
+            }
             _activeSession = session;
             _status.Text = _settings.Provider + " に送信しています…";
             await session.SendAsync(message, Display, AskAsync, _request.Token);
@@ -312,7 +360,63 @@ public sealed class ChatPanel : UserControl
                 }
             }
         }
-        finally { _answer = null; _activeSession = null; _request?.Dispose(); _request = null; Busy(false); }
+        finally { _answer = null; _activeSession = null; _request?.Dispose(); _request = null; Busy(false); MarkHistoryDirty(); SaveHistorySafely(); }
+    }
+
+    private void MarkHistoryDirty()
+    {
+        if (_restoring || _historyStore is null || IsDisposed || Disposing) return;
+        _historyDirty = true;
+        if (!_historyTimer.Enabled) _historyTimer.Start();
+    }
+    private void SaveHistory()
+    {
+        if (_historyStore is null || !_historyDirty || _restoring) return;
+        _chat.Messages = _conversation.Snapshot();
+        _chat.Draft = _input.Text; _chat.Attachments = _attachments.ToList();
+        _chat.Provider = _settings.Provider;
+        _chat.Models = _settings.Providers.ToDictionary(x => x.Key, x => x.Key == _settings.Provider ? _model.Text : x.Value.Model);
+        foreach (var pair in _sessions)
+            if (pair.Value.SessionId is { } id) _chat.Sessions[pair.Key] = id;
+        var first = _chat.Messages.FirstOrDefault(x => x.Role == "あなた")?.Text;
+        if (first is null && string.IsNullOrWhiteSpace(_chat.Draft) && _chat.Attachments.Count == 0) { _historyTimer.Stop(); return; }
+        var title = (first ?? _chat.Draft).Replace("\r", " ").Replace("\n", " ").Trim();
+        _chat.Title = string.IsNullOrEmpty(title) ? "添付ファイルのチャット" : title[..Math.Min(title.Length, 60)];
+        _chat.UpdatedAt = DateTimeOffset.UtcNow;
+        _historyStore.Save(_chat);
+        _historyDirty = false; _historyTimer.Stop();
+    }
+    private void SaveHistorySafely()
+    {
+        if (IsDisposed) return;
+        try { SaveHistory(); }
+        catch (Exception ex) { _historyTimer.Stop(); _status.Text = "履歴を保存できません: " + ex.Message; }
+    }
+    private void RestoreChat(ChatRecord record)
+    {
+        _restoring = true;
+        try
+        {
+            _chat = record;
+            _choice.SelectedItem = ChatSettings.AvailableProviders.Contains(record.Provider) ? record.Provider : AiProvider.Codex;
+            foreach (var pair in record.Models)
+                if (_settings.Providers.TryGetValue(pair.Key, out var options)) options.Model = pair.Value;
+            _model.Text = _settings.Providers[_settings.Provider].Model;
+            _conversation.Restore(record.Messages); _input.Text = record.Draft;
+            _attachments.Clear(); _attachments.AddRange(record.Attachments); RefreshAttachments();
+            _historyDirty = false; _historyTimer.Stop();
+            _status.Text = "履歴を表示しています。指示を送信すると再開します。";
+        }
+        finally { _restoring = false; }
+    }
+    private async Task OpenChatAsync(string id)
+    {
+        if (_busy || _importing || _historyStore is null) return;
+        // Read first so a missing/corrupt history cannot clear the current conversation.
+        var record = _historyStore.Load(id);
+        SaveHistory();
+        if (id == _chat.Id) return;
+        await ResetSessionsAsync(); RestoreChat(record);
     }
 
     private async Task ResetSessionsAsync()
@@ -329,7 +433,7 @@ public sealed class ChatPanel : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _request?.Cancel(); _ = DisposeSessionsAsync(); _model.Dispose(); _notifier?.Dispose(); }
+        if (disposing) { SaveHistorySafely(); _historyTimer.Dispose(); _request?.Cancel(); _ = DisposeSessionsAsync(); _model.Dispose(); _notifier?.Dispose(); }
         base.Dispose(disposing);
     }
 }

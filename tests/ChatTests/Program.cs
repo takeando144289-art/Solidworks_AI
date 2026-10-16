@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using SolidWorksAgent.Chat;
 
+if (args.FirstOrDefault() == "--history-import-live") return HistoryChecks.ImportLive();
+if (args.FirstOrDefault() == "--history-live") return await HistoryChecks.Live();
 if (args.FirstOrDefault() == "--claude-live") return await NativeSessionChecks.ClaudeLive(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "app-server") return await NativeSessionChecks.FixtureServer();
 if (args.FirstOrDefault() == "--attachment-live") return await NativeSessionChecks.AttachmentLive(args.Skip(1).ToArray());
@@ -142,7 +144,7 @@ foreach (var provider in Enum.GetValues<AiProvider>())
     catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + provider + ": " + ex.Message); }
 }
 Console.WriteLine($"{tests.Count + 6 - failed}/{tests.Count + 6} checks passed");
-failed += await NativeSessionChecks.Run();
+failed += (await NativeSessionChecks.Run() + await HistoryChecks.Run());
 return failed == 0 ? 0 : 1;
 
 static void Check(bool value) { if (!value) throw new Exception("Assertion failed"); }

@@ -9,6 +9,13 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
 {
     private readonly AiProvider _provider = settings.Provider;
     private string? _session;
+    private bool _contextSent;
+    public string? SessionId => _session;
+    public void RestoreSession(string id)
+    {
+        if (_process is not null || _contextSent) throw new InvalidOperationException("会話は開始済みです。");
+        _session = id;
+    }
     private Process? _process;
 
     public static string[] Arguments(AiProvider provider, string model, string? session)
@@ -21,6 +28,7 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
         };
         if (session is not null) args.AddRange(["--resume", session]);
         if (!string.IsNullOrWhiteSpace(model)) args.AddRange(["--model", model]);
+        else if (provider == AiProvider.Claude && session is not null) args.AddRange(["--model", "default"]);
         return args.ToArray();
     }
 
@@ -35,7 +43,7 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
         // Terminate only the agent, never its CAD descendants midway through save/cleanup.
         using var registration = token.Register(() => { try { if (!process.HasExited) process.Kill(false); } catch (InvalidOperationException) { } });
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteAsync((_session is null ? AgentSession.Instructions(settings, processId) + "\n\n" : "") + message);
+        await process.StandardInput.WriteAsync((!_contextSent ? AgentSession.Instructions(settings, processId) + "\n\n" : "") + message);
         process.StandardInput.Close();
         var seenText = false;
         try
@@ -43,7 +51,8 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
             while (await process.StandardOutput.ReadLineAsync() is { } line)
             {
                 using var doc = JsonDocument.Parse(line); var root = doc.RootElement;
-                if (root.TryGetProperty("session_id", out var session)) _session = session.GetString();
+                if (root.TryGetProperty("session_id", out var session) && session.GetString() is { } id && id != _session)
+                { _session = id; display(new("session", id)); }
                 var type = root.TryGetProperty("type", out var t) ? t.GetString() : "";
                 if (provider == AiProvider.Claude && type == "assistant" && root.TryGetProperty("message", out var msg))
                 {
@@ -66,6 +75,7 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
             await process.WaitForExitAsync();
             token.ThrowIfCancellationRequested();
             if (process.ExitCode != 0) throw new InvalidOperationException(await error);
+            _contextSent = true;
         }
         finally { _process = null; }
     }

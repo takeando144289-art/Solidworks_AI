@@ -102,6 +102,14 @@ internal static class NativeSessionChecks
             try { await ModelCatalog.ReadPagesAsync((_, _) => Task.FromResult(page.RootElement), CancellationToken.None); throw new Exception("Expected rejection"); }
             catch (InvalidDataException) { }
         });
+        await Test("Restored Codex thread uses native resume and refreshes current host instructions", async () =>
+        {
+            var settings = Settings(Environment.ProcessPath!); var events = new List<AgentEvent>();
+            await using var session = new CodexSession(settings, 456);
+            session.RestoreSession("native-thread");
+            await session.SendAsync("follow-up", events.Add, (_, _) => Task.FromResult("拒否"), CancellationToken.None);
+            Check(session.SessionId == "native-thread" && events.Any(x => x.Text == "same thread"));
+        });
         return failed;
     }
 
@@ -199,6 +207,9 @@ internal static class NativeSessionChecks
                             ? new[] { new { id="internal-b", model="second-model", displayName="Second model", hidden=false }, new { id="hidden", model="hidden", displayName="Hidden", hidden=true }, new { id="internal-a", model="fixture-model", displayName="Fixture model", hidden=false } }
                             : new[] { new { id="internal-a", model="fixture-model", displayName="Fixture model", hidden=false } };
                         Send(new { id, result = new { data, nextCursor = second ? null : "page-2" } }); break;
+                    case "thread/resume":
+                        if (p.GetProperty("threadId").GetString() != "native-thread" || !p.GetProperty("developerInstructions").GetString()!.Contains("process ID: 456")) return 17;
+                        goto case "thread/start";
                     case "thread/start":
                         threadStarted = true;
                         if (p.GetProperty("approvalsReviewer").GetString() != "auto_review" || p.GetProperty("sandbox").GetString() != "workspace-write" || p.GetProperty("approvalPolicy").GetString() != "on-request") return 13;

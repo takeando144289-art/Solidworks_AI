@@ -79,11 +79,20 @@ Open **設定** to set:
 - Node.js: `node.exe` or its full path when using npm-installed CLIs.
 
 Per-provider model names are editable under **モデル選択**. Empty uses the vendor default.
-Codex uses a persistent app-server thread while the pane is open. Claude uses
-native CLI session IDs for subsequent messages. Switching providers keeps their sessions
+Codex uses a persistent app-server thread; Claude uses native CLI session IDs.
+Both IDs and the displayed messages are saved per chat for later resume. Switching providers keeps their sessions
 separate; the UI transcript is shared visually but another provider does not inherit a
 private vendor session. **新しいチャット** starts fresh sessions. Closing SOLIDWORKS
-ends the pane connection; automatic transcript restoration after restart is not implemented.
+ends the pane connection; reopening restores the latest saved chat without sending a request.
+Use **履歴** to search/select another chat, then send a message to resume its native session.
+**新しいチャット** preserves previous conversations. History/new-chat/provider controls are
+disabled during work. Draft text, pending attachments and model selections are saved too.
+Transcripts live under `%LOCALAPPDATA%\SolidWorksAgent\chats\<project-key>\*.json`,
+with atomic replacement; native vendor session files are also required for continuation.
+The **以前の履歴を取り込む** button reads older conversations from Windows Codex/Claude
+logs for this project and this pane only, skipping subagents and duplicates. It never
+changes the original logs. If a vendor session is missing, the transcript remains
+viewable and resume reports the vendor error; it does not silently start an empty session.
 Settings remain in `%LOCALAPPDATA%\SolidWorksAgent\chat-settings.json`.
 Native agents can read project files and use tools under their own permission policies;
 the old “only title/path plus command JSON” data boundary no longer applies.
@@ -222,8 +231,10 @@ Discovery starts no conversation or inference turn and closes its temporary CLI 
 Selections apply to the next turn; returning to the default explicitly resolves the
 Windows Codex config so the conversation does not retain the previous model override.
 The catalog can be cached by Codex; inclusion is not a guarantee of account entitlement.
-Claude list discovery is not implemented; its picker explains this and retains
-default/manual selection. No API key or WSL configuration change is required.
+Claude uses its native stream-json initialize control response (`models`) to populate
+the same picker, with IDs, labels and descriptions supplied by the installed CLI.
+No inference request is sent to discover models. On resume, clearing a Claude model
+passes `--model default` so the previous override does not persist. No API key or WSL configuration change is required.
 
 Output versioning follows `AGENTS.md`: use one version/path during a request, with
 standing overwrite permission only for that request's own working files. After completion,
@@ -460,3 +471,15 @@ For public distribution, consider signing releases with a trusted code-signing c
 a signature identifies the publisher but does not exempt the app from scanning.
 For actual detections, record the product, detection name and file hash, and follow the
 [vendor review procedure](https://support.norton.com/sp/en/us/home/current/solutions/kb20090410134005EN).
+
+### Chat history and Claude model verification (2026-10-16)
+
+- Windows chat checks passed (54 legacy + 12 native/history checks); UI workflow checks
+  passed under both WinForms and native host message loops (32 each).
+- Real Windows Codex and Claude processes were closed and recreated, then resumed the
+  same native session and correctly recalled a unique word from the previous turn.
+  This verification did not operate CAD or change any model/drawing.
+- Claude Code 2.1.301 returned its model catalog, and the real list was displayed in the
+  model picker. Existing pane transcripts were imported into a temporary test store
+  (8 Codex / 3 Claude); original native logs and application history were unchanged.
+- The history selector was rendered and inspected with sample conversations.

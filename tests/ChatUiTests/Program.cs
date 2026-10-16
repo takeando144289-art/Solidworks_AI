@@ -9,7 +9,8 @@ internal static class Program
     static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        if (args.FirstOrDefault() == "--model-picker-live") return ModelPickerLive(args[1]);
+        if (args.FirstOrDefault() == "--model-picker-live") return ModelPickerLive(args[1], args.Contains("--claude"));
+        if (args.FirstOrDefault() == "--history-preview") return HistoryPreview(args[1]);
         int failures = 0, count = 0;
         using var window = new Form { Size = new(420, 780) };
         window.Shown += async (_, _) =>
@@ -20,6 +21,51 @@ internal static class Program
                 try { await action(); Console.WriteLine("PASS " + name); }
                 catch (Exception ex) { failures++; Console.WriteLine("FAIL " + name + ": " + ex); }
             }
+            await Test("History survives panel restart, displays without inference and resumes the native session", async () =>
+            {
+                var root = Path.Combine(Path.GetTempPath(), "sw-ui-history-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var store = new ChatHistoryStore(root); string id;
+                    using (var f = new Fixture(window, store))
+                    {
+                        f.Field<ComboBox>("_choice").SelectedItem = AiProvider.Claude;
+                        f.Field<TextBox>("_model").Text = "saved-model";
+                        await f.Send("履歴に保存する指示"); id = store.List().Single().Id;
+                        f.Input.Text = "途中の下書き";
+                    }
+                    using (var f = new Fixture(window, store))
+                    {
+                        Check(f.Text.Contains("履歴に保存する指示") && f.Text.Contains("native reply") && f.Creations == 0);
+                        Check(f.Input.Text == "途中の下書き" && f.Field<TextBox>("_model").Text == "saved-model");
+                        Check(f.Field<ComboBox>("_choice").SelectedItem!.Equals(AiProvider.Claude));
+                        await f.Send("続きをお願いします"); Check(f.Session.RestoredId == "fixture-session");
+                        Check(f.Session.Messages.SequenceEqual(new[] { "続きをお願いします" }));
+                        f.Field<Button>("_newChat").PerformClick(); await Task.Yield();
+                        Check(!f.Text.Contains("履歴に保存する指示") && f.Input.Text == "");
+                        await f.Send("別の会話");
+                        Check(store.List().Count == 2 && store.Load(id).Messages.All(x => x.Text != "別の会話"));
+                        f.ClickDialogButton("_history", dialog =>
+                        {
+                            var list = Descendants(dialog).OfType<ListBox>().Single();
+                            list.SelectedItem = list.Items.Cast<ChatRecord>().Single(x => x.Id == id);
+                            Descendants(dialog).OfType<Button>().Single(x => x.Text == "開く").PerformClick();
+                        });
+                        await Task.Yield(); Check(f.Text.Contains("履歴に保存する指示") && !f.Text.Contains("別の会話"));
+                    }
+                }
+                finally { Directory.Delete(root, true); }
+            });
+            await Test("History and new chat are disabled during an active native turn", async () =>
+            {
+                using var f = new Fixture(window); var done = new TaskCompletionSource();
+                f.Session.Run = (_, _, _, _) => done.Task;
+                var task = f.Send("作業中");
+                Check(!f.Field<Button>("_history").Enabled && !f.Field<Button>("_newChat").Enabled);
+                f.Field<Button>("_newChat").PerformClick(); Check(f.Text.Contains("作業中"));
+                done.SetResult(); await task;
+                Check(f.Field<Button>("_history").Enabled && f.Field<Button>("_newChat").Enabled);
+            });
             await Test("Only Codex and Claude appear in provider and connection controls", async () =>
             {
                 using var f = new Fixture(window);
@@ -361,10 +407,26 @@ internal static class Program
         else Application.Run(window);
         return failures == 0 ? 0 : 1;
     }
-    static int ModelPickerLive(string screenshot)
+    static int HistoryPreview(string screenshot)
+    {
+        using var dialog = new ChatHistoryDialog([
+            new() { Title = "プレートのモデル作成と寸法の調整", Provider = AiProvider.Codex },
+            new() { Title = "シャフト図面の寸法と幾何公差", Provider = AiProvider.Claude },
+            new() { Title = "ブラケットのねじ穴を追加", Provider = AiProvider.Codex }
+        ], "", _ => Task.FromResult<IReadOnlyList<ChatRecord>>([]));
+        using var timer = new System.Windows.Forms.Timer { Interval = 150 };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop(); using var bitmap = new Bitmap(dialog.Width, dialog.Height);
+            dialog.DrawToBitmap(bitmap, new Rectangle(Point.Empty, dialog.Size)); bitmap.Save(screenshot); dialog.Close();
+        };
+        dialog.Shown += (_, _) => timer.Start(); Application.Run(dialog); return 0;
+    }
+    static int ModelPickerLive(string screenshot, bool claude)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         var settings = ChatSettings.Load();
+        if (claude) settings.Provider = AiProvider.Claude;
         using var dialog = new ModelSelectionDialog(settings.Provider, settings.Providers[settings.Provider].Model,
             token => ModelCatalog.ListAsync(settings, token));
         using var timer = new System.Windows.Forms.Timer { Interval = 100 };
@@ -414,9 +476,9 @@ internal static class Program
         public FakeSession Session { get; } = new();
         public int Creations;
         public FakeNotifier Notifier { get; } = new();
-        public Fixture(Form form)
+        public Fixture(Form form, ChatHistoryStore? history = null)
         {
-            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; }, Notifier, (_, _) => Task.FromResult<IReadOnlyList<AgentModel>>([new("fixture-model", "Fixture model", "Test model")]));
+            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; }, Notifier, (_, _) => Task.FromResult<IReadOnlyList<AgentModel>>([new("fixture-model", "Fixture model", "Test model")]), history);
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         public T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;
@@ -496,6 +558,9 @@ internal static class Program
     }
     sealed class FakeSession : IAgentSession
     {
+        public string? SessionId { get; private set; } = "fixture-session";
+        public string? RestoredId;
+        public void RestoreSession(string id) { RestoredId = id; SessionId = id; }
         public List<string> Messages { get; } = [];
         public List<AgentMessage> Inputs { get; } = [];
         public Task SendAsync(AgentMessage message, Action<AgentEvent> display, Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token)

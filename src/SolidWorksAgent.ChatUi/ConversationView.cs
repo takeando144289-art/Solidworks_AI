@@ -9,6 +9,14 @@ public sealed class ConversationView : Panel
     private readonly List<MessageBubble> _messages = [];
     private bool _arranging;
     public event Action<Control>? MessageAdded;
+    public List<SolidWorksAgent.Chat.HistoryMessage> Snapshot() => _messages.Select(x => new SolidWorksAgent.Chat.HistoryMessage(x.Role, x.MessageText)).ToList();
+    public void Restore(IEnumerable<SolidWorksAgent.Chat.HistoryMessage> messages)
+    {
+        Clear(); _arranging = true;
+        try { foreach (var message in messages) AddMessage(message.Role, message.Text); }
+        finally { _arranging = false; ArrangeMessages(); }
+        if (_messages.Count > 0) ScrollControlIntoView(_messages[^1]);
+    }
     public string TranscriptText => string.Join("\n\n", _messages.Select(x => x.Role + "\n" + x.MessageText));
 
     public ConversationView()
@@ -22,7 +30,7 @@ public sealed class ConversationView : Panel
     {
         var message = new MessageBubble(role, text, role == "あなた") { Font = Font };
         _messages.Add(message); Controls.Add(message);
-        ArrangeMessages(); ScrollControlIntoView(message);
+        ArrangeMessages(); if (!_arranging) ScrollControlIntoView(message);
         MessageAdded?.Invoke(message);
         return message;
     }

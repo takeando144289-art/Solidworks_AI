@@ -16,7 +16,13 @@ public sealed class CodexSession(ChatSettings settings, int processId,
     private readonly ConcurrentDictionary<long, Task> _serverCalls = new();
     private Process? _process;
     private Task? _reader, _stderr;
-    private string? _thread, _turn;
+    private string? _thread, _turn, _resumeThread;
+    public string? SessionId => _thread ?? _resumeThread;
+    public void RestoreSession(string id)
+    {
+        if (_thread is not null) throw new InvalidOperationException("会話は開始済みです。");
+        _resumeThread = id;
+    }
     private long _next;
     private TaskCompletionSource? _finished;
     private Action<AgentEvent>? _display;
@@ -102,8 +108,9 @@ public sealed class CodexSession(ChatSettings settings, int processId,
         await StartServerAsync(token);
         if (_thread is not null) return;
         // Let Codex review eligible escalation requests itself; keep its sandbox and policy checks.
-        var result = await CallAsync("thread/start", new
+        var result = await CallAsync(_resumeThread is null ? "thread/start" : "thread/resume", new
         {
+            threadId = _resumeThread,
             cwd = settings.ProjectDirectory,
             model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model,
             sandbox = "workspace-write", approvalPolicy = "on-request", approvalsReviewer = "auto_review",
@@ -111,7 +118,8 @@ public sealed class CodexSession(ChatSettings settings, int processId,
             dynamicTools = new[] { new { type = "function", name = "solidworks_cli", description = "Run the existing Windows SOLIDWORKS CLI in this pane's instance. Pass CLI arguments without --solidworks-pid. --help lists all commands; optional stdin carries API plans. Returns actual exitCode/output/error. No host retry or command catalog restriction.", inputSchema = JsonNode.Parse("""{"type":"object","properties":{"arguments":{"type":"array","items":{"type":"string"}},"stdin":{"type":["string","null"]}},"required":["arguments","stdin"],"additionalProperties":false}""") } }
         }, token);
         _thread = result.GetProperty("thread").GetProperty("id").GetString();
-        _modelOverrideActive = !string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model);
+        _modelOverrideActive = _resumeThread is not null || !string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model);
+        _display?.Invoke(new("session", _thread!));
         _display?.Invoke(new("status", "Codexに接続しました。"));
     }
 
