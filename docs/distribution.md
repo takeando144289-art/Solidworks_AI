@@ -16,7 +16,7 @@ Windows PowerShellから、Windows版Gitと.NET 8 SDKがある環境で実行し
 Windows側にGitがない場合は、WSLでコミット済みソースをエクスポートします。
 
 ```bash
-git archive --format=zip --output=artifacts/distribution-source.zip HEAD -- src tests AGENTS.md Directory.Build.props SolidWorksAgent.sln .gitignore scripts/Build-ChatAddin.ps1 scripts/Register-ChatAddin.ps1 docs/api-automation.md docs/architecture.md docs/chat-addin.md
+git archive --format=zip --output=artifacts/distribution-source.zip HEAD -- src tests AGENTS.md CAD_MODEL_RULES.md DRAWING_RULES.md Directory.Build.props SolidWorksAgent.sln .gitignore scripts/Build-ChatAddin.ps1 scripts/Register-ChatAddin.ps1 docs/api-automation.md docs/architecture.md docs/chat-addin.md
 git rev-parse HEAD
 ```
 

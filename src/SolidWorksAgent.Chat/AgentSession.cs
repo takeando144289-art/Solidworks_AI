@@ -34,7 +34,12 @@ public static class AgentSession
         It accepts any existing CLI command and optional stdin, including api search/describe/execute --plan-stdin.
         You also have your native agent tools. Inspect source/docs and use or extend existing tools when the task needs it.
         Decide how to inspect, execute, verify and recover using your own agent workflow. The pane only relays messages and tools.
-        Protect existing CAD files and unsaved user work. Overwrite only when the user explicitly authorizes it and --overwrite is passed.
+        Follow AGENTS.md for per-request output versioning. Its standing permission allows --overwrite for working files
+        created by the current unfinished request; reuse that version and path throughout trials, repairs and re-exports.
+        After completion, a new modification request gets the next unused version; copy before editing, preserving prior versions.
+        Clarification replies, retries, inspection and explanation alone do not advance versions.
+        Protect user originals and unsaved changes. Overwriting originals or completed versions requires separate explicit permission.
+        Clean up only this request's own unnecessary temporary files after verification; preserve required CAD references and prior files.
         Rebuild and validate geometry after features; keep the saved final output open and close only your own intermediate documents.
         COM calls belong in src/SolidWorksAgent.SwApi. Public dimensions are mm, converted at the COM boundary.
         Do not change WSL settings or switch execution to WSL. Do not stop, unload or replace the hosting add-in during a CAD task.

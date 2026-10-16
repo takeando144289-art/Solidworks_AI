@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Path $stage,$package -Force | Out-Null
 $archive = Join-Path $output 'source.zip'
 if ($SourceArchive) { Copy-Item -LiteralPath $SourceArchive -Destination $archive }
 else {
-    & git -C $root archive --format=zip "--output=$archive" $commit -- src tests AGENTS.md Directory.Build.props SolidWorksAgent.sln .gitignore scripts/Build-ChatAddin.ps1 scripts/Register-ChatAddin.ps1 docs/api-automation.md docs/architecture.md docs/chat-addin.md
+    & git -C $root archive --format=zip "--output=$archive" $commit -- src tests AGENTS.md CAD_MODEL_RULES.md DRAWING_RULES.md Directory.Build.props SolidWorksAgent.sln .gitignore scripts/Build-ChatAddin.ps1 scripts/Register-ChatAddin.ps1 docs/api-automation.md docs/architecture.md docs/chat-addin.md
     if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
 }
 Expand-Archive -LiteralPath $archive -DestinationPath $stage

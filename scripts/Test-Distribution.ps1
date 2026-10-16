@@ -8,7 +8,7 @@ foreach ($item in $manifest.files) {
     if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $item.sha256) { throw "Checksum mismatch: $($item.path)" }
     if ($item.path -match '(^|/)(workspace|output|logs|\.codex|\.git|node_modules|bin|obj)/' -or $item.path -match '(auth\.json|chat-settings\.json|chat-defaults\.json|\.pdb$|SolidWorks\.Interop\.)') { throw "Unexpected distribution file: $($item.path)" }
 }
-foreach ($name in @('Setup.cmd','Setup.ps1','Login-Codex.cmd','Install-Machine.ps1','START-HERE.txt','app/cli/swagent.exe','app/addin/SolidWorksAgent.ChatAddin.V7.comhost.dll','project/AGENTS.md')) {
+foreach ($name in @('Setup.cmd','Setup.ps1','Login-Codex.cmd','Install-Machine.ps1','START-HERE.txt','app/cli/swagent.exe','app/addin/SolidWorksAgent.ChatAddin.V7.comhost.dll','project/AGENTS.md','project/CAD_MODEL_RULES.md','project/DRAWING_RULES.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PackageDirectory $name))) { throw "Missing distribution file: $name" }
 }
 foreach ($file in (Get-ChildItem $PackageDirectory -Filter '*.ps1' -Recurse)) {

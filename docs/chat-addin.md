@@ -216,6 +216,14 @@ The catalog can be cached by Codex; inclusion is not a guarantee of account enti
 Claude/Gemini list discovery is not implemented; their picker explains this and retains
 default/manual selection. No API key or WSL configuration change is required.
 
+Output versioning follows `AGENTS.md`: use one version/path during a request, with
+standing overwrite permission only for that request's own working files. After completion,
+a new modification request starts the next unused version, preserving completed outputs
+and user originals. Retries, clarification answers and read-only requests do not increment
+versions. Keep CAD references intact; clean up only unnecessary temporary files created
+by the current request after verification. The agent applies this policy using its native
+tools; the chat host does not add a versioning or deletion control loop.
+
 User instructions appear in right-aligned, tinted bordered bubbles; AI messages appear on the left.
 Speaker names are hidden; position and background color distinguish the messages.
 Message text remains selectable, including while responses stream.
