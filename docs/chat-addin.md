@@ -125,8 +125,10 @@ and allows in-flight saves/cleanup to finish on stop. The usual rebuild, geometr
 file overwrite and document ownership checks remain in the CAD implementation.
 
 Codex keeps its native file/shell tools and Windows configuration. The thread requests
-workspace-write and on-request approvals; native approval/input requests are shown in
-chat and answers are returned to Codex. No approval is invented or automatically accepted.
+workspace-write and on-request approvals with `approvalsReviewer=auto_review`.
+Codex reviews eligible escalation requests itself, so routine CAD work does not wait
+for repeated user approvals. The pane does not automatically accept raw approval
+requests. Exceptional user-only approvals and missing design inputs still appear in chat.
 The project location, CAD executable and host PID are supplied as integration context.
 The normal Codex instructions are preserved; baseInstructions are not replaced.
 
@@ -155,7 +157,7 @@ Windows subprocess argument/UTF-8 round trips, cancellation, output bounds and
 all three provider adapters using local fixture processes. These tests do not
 contact paid AI services and do not prove real-account authentication.
 
-Standalone UI preview: run `SolidWorksAgent.ChatUi.V6.exe` from the addin package.
+Standalone UI preview: run `SolidWorksAgent.ChatUi.V7.exe` from the addin package.
 It displays the actual control without attaching to CAD. The `--smoke-test <png>`
 option renders the UI and exits for visual verification.
 Runtime add-in errors: `%LOCALAPPDATA%\SolidWorksAgent\addin.log`.
@@ -288,3 +290,18 @@ app-server made three synthetic tool calls: failed trial, inspection, corrected 
 The matching native runtime is in `artifacts\chat-native\tools`. The V6 COM pane was
 registered and confirmed connected in the running SOLIDWORKS instance; V5 was unloaded.
 No CAD document was modified by the native-agent synthetic test. WSL settings are unchanged.
+
+## Automatic approval review (V7)
+
+Both thread/start and turn/start explicitly select Codex's native auto-review reviewer.
+The sandbox remains workspace-write, with on-request escalation. Approval policy is not
+changed globally, and no Windows/WSL Codex configuration file is modified. A denied
+review remains denied; the agent can diagnose and try an allowed alternative.
+V7 has a separate COM/assembly identity for updating a running SOLIDWORKS session.
+
+V7 verification (2026-10-16): 92 automated checks passed. A real Codex native-shell
+connection check first failed to find SOLIDWORKS in the sandbox's Running Object Table,
+then requested escalation, passed automatic review and returned exit code 0 with
+`connected: true`. The client received zero manual approval requests. This test only
+connected; it did not read or modify CAD documents. The updated package is
+`artifacts\chat-auto-review`, reusing the complete runtime in `artifacts\chat-native\tools`.

@@ -25,7 +25,7 @@ internal static class NativeSessionChecks
             Check(calls.SequenceEqual(new[] { "trial", "corrected" }));
             Check(messages.Any(m => m.Text == "verified") && messages.Any(m => m.Text == "same thread"));
         });
-        await Test("Codex native approval is relayed, never auto accepted", async () =>
+        await Test("Exceptional native approval still respects user denial", async () =>
         {
             await using var session = new CodexSession(Settings(Environment.ProcessPath!), 123); var asked = 0; var events = new List<AgentEvent>();
             await session.SendAsync("approval", events.Add, (_, _) => { asked++; return Task.FromResult("拒否"); }, CancellationToken.None);
@@ -76,6 +76,19 @@ internal static class NativeSessionChecks
         return calls >= 3 && events.Any(e => e.Kind == "message") ? 0 : 1;
     }
 
+    public static async Task<int> ReviewLive(string[] args)
+    {
+        var settings = Settings(args[0]); settings.ProjectDirectory = args[1]; settings.CadExecutable = args[2];
+        var events = new List<AgentEvent>(); int questions = 0;
+        await using var session = new CodexSession(settings, int.Parse(args[3]));
+        using var token = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        await session.SendAsync("Verify a read-only Windows SOLIDWORKS connection using your NATIVE SHELL tool to invoke the supplied CAD executable with arguments: connect --solidworks-pid " + args[3] + " --json. Do not use solidworks_cli for this test. Use System.Diagnostics.ProcessStartInfo with FileName set to the CAD executable, Arguments set to the connect arguments, UseShellExecute=false, RedirectStandardOutput=true and RedirectStandardError=true; start the process, ReadToEndAsync both streams and WaitForExit, then report its exit code/output/error. Direct PowerShell invocation sometimes loses native-process output in this host. Do not inspect/read/create/change/save any CAD documents or source files. If COM cannot connect inside the sandbox, request the necessary escalation and retry. The user authorizes this connection check. Finish with CONNECTION_OK only after the CLI returned connected=true, otherwise report the actual error.",
+            e => { events.Add(e); if (e.Kind != "delta") Console.WriteLine(e.Kind + ": " + e.Text); },
+            (_, _) => { questions++; return Task.FromResult("拒否"); }, token.Token);
+        Console.WriteLine("Manual approval requests: " + questions);
+        return questions == 0 && events.Any(e => e.Kind == "message" && e.Text.Contains("CONNECTION_OK")) ? 0 : 1;
+    }
+
     public static async Task<int> FixtureServer()
     {
         Console.InputEncoding = System.Text.Encoding.UTF8; Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -99,9 +112,11 @@ internal static class NativeSessionChecks
                 {
                     case "initialize": Send(new { id, result = new { } }); break;
                     case "thread/start":
+                        if (p.GetProperty("approvalsReviewer").GetString() != "auto_review" || p.GetProperty("sandbox").GetString() != "workspace-write" || p.GetProperty("approvalPolicy").GetString() != "on-request") return 13;
                         if (p.TryGetProperty("baseInstructions", out _) || p.TryGetProperty("outputSchema", out _) || p.GetProperty("dynamicTools").GetArrayLength() != 1) return 9;
                         Send(new { id, result = new { thread = new { id = "native-thread" } } }); break;
                     case "turn/start":
+                        if (p.GetProperty("approvalsReviewer").GetString() != "auto_review" || p.GetProperty("approvalPolicy").GetString() != "on-request") return 14;
                         if (p.GetProperty("threadId").GetString() != "native-thread") return 10;
                         turn = "turn" + ++turns;
                         Send(new { id, result = new { turn = new { id = turn } } });

@@ -37,7 +37,7 @@ public sealed class CodexSession(ChatSettings settings, int processId,
             _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _turn = null;
             token.ThrowIfCancellationRequested();
-            var result = await CallAsync("turn/start", new { threadId = _thread, input = new[] { new { type = "text", text = message } }, model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model }, CancellationToken.None);
+            var result = await CallAsync("turn/start", new { threadId = _thread, approvalPolicy = "on-request", approvalsReviewer = "auto_review", input = new[] { new { type = "text", text = message } }, model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model }, CancellationToken.None);
             _turn = result.GetProperty("turn").GetProperty("id").GetString();
             try { await _finished.Task.WaitAsync(token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -76,13 +76,14 @@ public sealed class CodexSession(ChatSettings settings, int processId,
         _process = new() { StartInfo = ProcessRunner.StartInfo(exe, prefix.Concat(["app-server", "--listen", "stdio://"]), settings.ProjectDirectory) };
         if (!_process.Start()) throw new IOException("Codex app-serverを起動できませんでした。");
         _reader = ReadAsync(); _stderr = ReadErrorsAsync();
-        await CallAsync("initialize", new { clientInfo = new { name = "solidworks_chat", title = "SOLIDWORKS Chat", version = "6.0" }, capabilities = new { experimentalApi = true } }, token);
+        await CallAsync("initialize", new { clientInfo = new { name = "solidworks_chat", title = "SOLIDWORKS Chat", version = "7.0" }, capabilities = new { experimentalApi = true } }, token);
         await WriteAsync(new { method = "initialized", @params = new { } });
+        // Let Codex review eligible escalation requests itself; keep its sandbox and policy checks.
         var result = await CallAsync("thread/start", new
         {
             cwd = settings.ProjectDirectory,
             model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model,
-            sandbox = "workspace-write", approvalPolicy = "on-request",
+            sandbox = "workspace-write", approvalPolicy = "on-request", approvalsReviewer = "auto_review",
             developerInstructions = AgentSession.Instructions(settings, processId),
             dynamicTools = new[] { new { type = "function", name = "solidworks_cli", description = "Run the existing Windows SOLIDWORKS CLI in this pane's instance. Pass CLI arguments without --solidworks-pid. --help lists all commands; optional stdin carries API plans. Returns actual exitCode/output/error. No host retry or command catalog restriction.", inputSchema = JsonNode.Parse("""{"type":"object","properties":{"arguments":{"type":"array","items":{"type":"string"}},"stdin":{"type":["string","null"]}},"required":["arguments","stdin"],"additionalProperties":false}""") } }
         }, token);

@@ -9,7 +9,7 @@ using SolidWorksAgent.SwApi.Interop;
 namespace SolidWorksAgent.SwApi.Addin;
 
 [ComVisible(true)]
-[Guid("329431B7-EE93-4988-9079-7F0CE7464504")]
+[Guid("329431B7-EE93-4988-9079-7F0CE7464505")]
 [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
 public interface IChatAddinAutomation
 {
@@ -19,10 +19,10 @@ public interface IChatAddinAutomation
 }
 
 [ComVisible(true)]
-[Guid("E2CF72C9-B695-48DF-968F-EAB0E85B9A27")]
+[Guid("E2CF72C9-B695-48DF-968F-EAB0E85B9A28")]
 [ClassInterface(ClassInterfaceType.None)]
 [ComDefaultInterface(typeof(IChatAddinAutomation))]
-[ProgId("SolidWorksAgent.ChatAddin.V6")]
+[ProgId("SolidWorksAgent.ChatAddin.V7")]
 public sealed class ChatAddin : ISwAddin, IChatAddinAutomation
 {
     private ITaskpaneView? _taskPane;
@@ -60,7 +60,7 @@ public sealed class ChatAddin : ISwAddin, IChatAddinAutomation
     {
         Connected = _taskPane is not null && _panel is { IsDisposed: false, IsHandleCreated: true },
         ProcessId = Process.GetCurrentProcess().Id,
-        Interface = "autonomous-v6",
+        Interface = "auto-review-v7",
         Chat = _panel?.Status,
         Width = _panel?.Width, Height = _panel?.Height
     });

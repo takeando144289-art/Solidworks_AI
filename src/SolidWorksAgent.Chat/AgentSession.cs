@@ -26,6 +26,7 @@ public static class AgentSession
         Target SOLIDWORKS process ID: {processId}
         Read AGENTS.md and relevant project documentation. The CLI --help and docs/api-automation.md describe existing tools.
         Prefer the solidworks_cli tool when available; otherwise invoke the Windows CLI with --solidworks-pid {processId} --json.
+        When running a Windows CLI from PowerShell, use Diagnostics.Process with redirected stdout/stderr and WaitForExit if direct invocation returns no output.
         It accepts any existing CLI command and optional stdin, including api search/describe/execute --plan-stdin.
         You also have your native agent tools. Inspect source/docs and use or extend existing tools when the task needs it.
         Decide how to inspect, execute, verify and recover using your own agent workflow. The pane only relays messages and tools.

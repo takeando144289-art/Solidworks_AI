@@ -3,6 +3,7 @@ using System.Text.Json;
 using SolidWorksAgent.Chat;
 
 if (args.FirstOrDefault() == "app-server") return await NativeSessionChecks.FixtureServer();
+if (args.FirstOrDefault() == "--review-live") return await NativeSessionChecks.ReviewLive(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "--native-live") return await NativeSessionChecks.Live(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "--echo")
 {

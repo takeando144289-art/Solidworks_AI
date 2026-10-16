@@ -283,8 +283,8 @@ Usage:
   swagent sketch add-dimension --sketch <name> --kind <length|distance|horizontal|vertical|diameter|radius> --entities <ids> [--value <mm>] [--json]
   swagent sketch add-relation --sketch <name> --kind <horizontal|vertical|coincident|concentric|parallel|perpendicular|tangent|equal|midpoint|collinear> --entities <ids> [--json]
   swagent chat check-connection [--solidworks-pid <pid>] [--json]
-  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V6.comhost.dll> [--json]
-  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V6.comhost.dll> [--json]
+  swagent chat load-addin --path <SolidWorksAgent.ChatAddin.V7.comhost.dll> [--json]
+  swagent chat unload-addin --path <SolidWorksAgent.ChatAddin.V7.comhost.dll> [--json]
   swagent info [--json]
   swagent part create-cylinder --diameter <mm> --length <mm>
       [--output <name.SLDPRT>] [--template <file.prtdot>] [--overwrite]
