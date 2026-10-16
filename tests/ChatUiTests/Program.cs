@@ -9,6 +9,7 @@ internal static class Program
     static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if (args.FirstOrDefault() == "--model-picker-live") return ModelPickerLive(args[1]);
         int failures = 0, count = 0;
         using var window = new Form { Size = new(420, 780) };
         window.Shown += async (_, _) =>
@@ -114,14 +115,41 @@ internal static class Program
                 {
                     f.ClickDialogButton("_selectModel", dialog =>
                     {
-                        dialog.Controls.OfType<TextBox>().Single().Text = "fixture-model";
-                        dialog.Controls.OfType<Button>().Single().PerformClick();
+                        var picker = (ModelSelectionDialog)dialog;
+                        var list = Descendants(picker).OfType<ListBox>().Single();
+                        list.SelectedItem = list.Items.Cast<AgentModel>().Single(x => x.Id == "fixture-model");
+                        Descendants(picker).OfType<Button>().Single(x => x.Text == "選択して保存").PerformClick();
                     });
                     await Task.Yield();
                     Check(f.Field<TextBox>("_model").Text == "fixture-model");
                 }
                 await f.Send("モデル変更後の会話");
                 Check(f.Field<ChatSettings>("_settings").Providers[f.Field<ChatSettings>("_settings").Provider].Model == "fixture-model");
+            });
+            await Test("Model picker preserves unknown model on failure and supports retry/default", async () =>
+            {
+                int calls = 0;
+                using var dialog = new ModelSelectionDialog(AiProvider.Codex, "existing-model", _ =>
+                    ++calls == 1 ? Task.FromException<IReadOnlyList<AgentModel>>(new IOException("fixture offline"))
+                    : Task.FromResult<IReadOnlyList<AgentModel>>([new("fixture-model", "Fixture", "Description")]));
+                dialog.Show(window); await WaitUntil(() => calls > 0);
+                Check(dialog.SelectedModel == "existing-model" && Descendants(dialog).OfType<Label>().Any(x => x.Text.Contains("fixture offline")));
+                Descendants(dialog).OfType<Button>().Single(x => x.Text == "一覧を再取得").PerformClick(); await Task.Yield();
+                var list = Descendants(dialog).OfType<ListBox>().Single();
+                Check(list.Items.Cast<AgentModel>().Any(x => x.Id == "fixture-model"));
+                list.SelectedIndex = 0; Check(dialog.SelectedModel == ""); dialog.Close();
+            });
+            await Test("Closing the model picker cancels pending discovery without changing the selection", async () =>
+            {
+                bool cancelled = false, started = false;
+                using var dialog = new ModelSelectionDialog(AiProvider.Codex, "existing-model", async token =>
+                {
+                    try { started = true; await Task.Delay(Timeout.Infinite, token); }
+                    catch (OperationCanceledException) { cancelled = true; throw; }
+                    return Array.Empty<AgentModel>();
+                });
+                dialog.Show(window); await WaitUntil(() => started); dialog.Close(); await WaitUntil(() => cancelled);
+                Check(cancelled);
             });
             await Test("Connection settings can open and cancel without losing conversation", async () =>
             {
@@ -317,6 +345,42 @@ internal static class Program
         else Application.Run(window);
         return failures == 0 ? 0 : 1;
     }
+    static int ModelPickerLive(string screenshot)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        var settings = ChatSettings.Load();
+        using var dialog = new ModelSelectionDialog(settings.Provider, settings.Providers[settings.Provider].Model,
+            token => ModelCatalog.ListAsync(settings, token));
+        using var timer = new System.Windows.Forms.Timer { Interval = 100 };
+        int ticks = 0, result = 1;
+        timer.Tick += (_, _) =>
+        {
+            var list = Descendants(dialog).OfType<ListBox>().Single();
+            var loading = (bool)typeof(ModelSelectionDialog).GetField("_loading", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+            if (loading && ++ticks < 400) return;
+            timer.Stop();
+            foreach (AgentModel model in list.Items) Console.WriteLine(model.Id + " | " + model.DisplayName);
+            using var bitmap = new Bitmap(dialog.Width, dialog.Height);
+            dialog.DrawToBitmap(bitmap, new Rectangle(Point.Empty, dialog.Size)); bitmap.Save(screenshot);
+            result = !loading && list.Items.Count > 2 ? 0 : 1;
+            foreach (var label in Descendants(dialog).OfType<Label>()) Console.WriteLine(label.Text);
+            dialog.Close();
+        };
+        dialog.Shown += (_, _) => timer.Start(); Application.Run(dialog); return result;
+    }
+    static async Task WaitUntil(Func<bool> predicate)
+    {
+        for (var i = 0; i < 200 && !predicate(); i++) await Task.Delay(10);
+        Check(predicate());
+    }
+    static IEnumerable<Control> Descendants(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
+    }
     [StructLayout(LayoutKind.Sequential)]
     struct NativeMessage { public nint Hwnd; public uint Message; public nuint WParam; public nint LParam; public uint Time; public System.Drawing.Point Point; public uint Private; }
     [DllImport("user32.dll")] static extern int GetMessage(out NativeMessage message, nint window, uint first, uint last);
@@ -336,7 +400,7 @@ internal static class Program
         public FakeNotifier Notifier { get; } = new();
         public Fixture(Form form)
         {
-            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; }, Notifier);
+            Panel = new ChatPanel(123, (_, _) => { Creations++; return Session; }, Notifier, (_, _) => Task.FromResult<IReadOnlyList<AgentModel>>([new("fixture-model", "Fixture model", "Test model")]));
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         public T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;

@@ -23,7 +23,7 @@ public sealed class CodexSession(ChatSettings settings, int processId,
     private Func<AgentQuestion, CancellationToken, Task<string>>? _ask;
     private CancellationToken _turnToken;
     private string _diagnostics = "";
-    private bool _disposed;
+    private bool _disposed, _initialized, _modelOverrideActive;
 
     public Task SendAsync(string message, Action<AgentEvent> display,
         Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token) =>
@@ -41,7 +41,9 @@ public sealed class CodexSession(ChatSettings settings, int processId,
             _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _turn = null;
             token.ThrowIfCancellationRequested();
-            var result = await CallAsync("turn/start", new { threadId = _thread, approvalPolicy = "on-request", approvalsReviewer = "auto_review", input = message.ToCodexInput(), model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model }, CancellationToken.None);
+            var model = await ResolveTurnModelAsync(token);
+            var result = await CallAsync("turn/start", new { threadId = _thread, approvalPolicy = "on-request", approvalsReviewer = "auto_review", input = message.ToCodexInput(), model }, CancellationToken.None);
+            _modelOverrideActive = !string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model);
             _turn = result.GetProperty("turn").GetProperty("id").GetString();
             try { await _finished.Task.WaitAsync(token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -68,12 +70,13 @@ public sealed class CodexSession(ChatSettings settings, int processId,
         await CallAsync("turn/steer", new { threadId = _thread, expectedTurnId = _turn, input = message.ToCodexInput() }, token);
     }
 
-    private async Task StartAsync(CancellationToken token)
+    private async Task StartServerAsync(CancellationToken token)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_process is not null)
         {
             if (_process.HasExited) throw new IOException("Codex接続が終了しています。新しい会話を開始してください。\n" + _diagnostics);
-            if (_thread is null) throw new IOException("Codexの初期化に失敗しています。新しい会話を開始してください。");
+            if (!_initialized) throw new IOException("Codexの初期化に失敗しています。新しい会話を開始してください。");
             return;
         }
         if (!Directory.Exists(settings.ProjectDirectory)) throw new DirectoryNotFoundException("Windows側の作業フォルダーを設定してください。");
@@ -84,6 +87,20 @@ public sealed class CodexSession(ChatSettings settings, int processId,
         _reader = ReadAsync(); _stderr = ReadErrorsAsync();
         await CallAsync("initialize", new { clientInfo = new { name = "solidworks_chat", title = "SOLIDWORKS Chat", version = "7.0" }, capabilities = new { experimentalApi = true } }, token);
         await WriteAsync(new { method = "initialized", @params = new { } });
+        _initialized = true;
+    }
+
+    public async Task<IReadOnlyList<AgentModel>> ListModelsAsync(CancellationToken token)
+    {
+        await StartServerAsync(token);
+        return await ModelCatalog.ReadPagesAsync((cursor, ct) => CallAsync("model/list",
+            new { cursor, limit = 100, includeHidden = false }, ct), token);
+    }
+
+    private async Task StartAsync(CancellationToken token)
+    {
+        await StartServerAsync(token);
+        if (_thread is not null) return;
         // Let Codex review eligible escalation requests itself; keep its sandbox and policy checks.
         var result = await CallAsync("thread/start", new
         {
@@ -94,7 +111,23 @@ public sealed class CodexSession(ChatSettings settings, int processId,
             dynamicTools = new[] { new { type = "function", name = "solidworks_cli", description = "Run the existing Windows SOLIDWORKS CLI in this pane's instance. Pass CLI arguments without --solidworks-pid. --help lists all commands; optional stdin carries API plans. Returns actual exitCode/output/error. No host retry or command catalog restriction.", inputSchema = JsonNode.Parse("""{"type":"object","properties":{"arguments":{"type":"array","items":{"type":"string"}},"stdin":{"type":["string","null"]}},"required":["arguments","stdin"],"additionalProperties":false}""") } }
         }, token);
         _thread = result.GetProperty("thread").GetProperty("id").GetString();
+        _modelOverrideActive = !string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model);
         _display?.Invoke(new("status", "Codexに接続しました。"));
+    }
+
+    private async Task<string?> ResolveTurnModelAsync(CancellationToken token)
+    {
+        var selected = settings.Providers[AiProvider.Codex].Model;
+        if (!string.IsNullOrWhiteSpace(selected)) return selected;
+        if (!_modelOverrideActive) return null;
+        // A null turn model keeps the thread's last model. Explicitly resolve the default
+        // when the user clears an override, without losing the existing conversation.
+        var result = await CallAsync("config/read", new { includeLayers = false, cwd = settings.ProjectDirectory }, token);
+        if (result.GetProperty("config").TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(model.GetString())) return model.GetString();
+        var models = await ListModelsAsync(token);
+        return models.FirstOrDefault(x => x.IsDefault)?.Id
+            ?? throw new InvalidOperationException("既定モデルを確認できませんでした。モデル一覧から使用するモデルを選んでください。");
     }
 
     private async Task<JsonElement> CallAsync(string method, object parameters, CancellationToken token)

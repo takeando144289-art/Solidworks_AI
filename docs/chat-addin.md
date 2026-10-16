@@ -204,6 +204,18 @@ SOLIDWORKS exits, so an in-process update can still require a restart.
 Enter sends a message; Shift+Enter inserts a newline. Provider selection stays in the
 compact header. The **設定**, **モデル選択** and **新しいチャット** buttons are always visible above the conversation, beneath the provider selector.
 
+The **モデル選択** button opens a list for Codex, fetched from the configured Windows
+Codex CLI using [app-server `model/list`](https://learn.chatgpt.com/docs/app-server#list-models-modellist).
+It follows pagination and excludes hidden entries; model names are not hard-coded.
+The picker includes the AI's default setting, refresh, and optional manual entry. Failed
+lookups keep the current selection and display an error instead of a blank dialog.
+Discovery starts no conversation or inference turn and closes its temporary CLI process.
+Selections apply to the next turn; returning to the default explicitly resolves the
+Windows Codex config so the conversation does not retain the previous model override.
+The catalog can be cached by Codex; inclusion is not a guarantee of account entitlement.
+Claude/Gemini list discovery is not implemented; their picker explains this and retains
+default/manual selection. No API key or WSL configuration change is required.
+
 User instructions appear in right-aligned, tinted bordered bubbles; AI messages appear on the left.
 Speaker names are hidden; position and background color distinguish the messages.
 Message text remains selectable, including while responses stream.

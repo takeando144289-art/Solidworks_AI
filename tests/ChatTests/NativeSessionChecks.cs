@@ -75,6 +75,31 @@ internal static class NativeSessionChecks
             Check(events.Any(e => e.Text == "attachments verified"));
             Check(message.ToPrompt().Contains("reference files") && message.ToPrompt().Contains("fixture"));
         });
+        await Test("Codex models use all pages, filter hidden entries and do not start a conversation", async () =>
+        {
+            var settings = Settings(Environment.ProcessPath!);
+            await using var session = new CodexSession(settings, 123);
+            var models = await session.ListModelsAsync(CancellationToken.None);
+            Check(models.Select(x => x.Id).SequenceEqual(new[] { "fixture-model", "second-model" }));
+            Check(models[0].DisplayName == "Fixture model");
+            settings.Providers[AiProvider.Codex].Model = "second-model";
+            var events = new List<AgentEvent>();
+            await session.SendAsync("model-check", events.Add, (_, _) => Task.FromResult("拒否"), CancellationToken.None);
+            Check(events.Any(x => x.Text == "second-model"));
+            settings.Providers[AiProvider.Codex].Model = "fixture-model";
+            events.Clear();
+            await session.SendAsync("model-check", events.Add, (_, _) => Task.FromResult("拒否"), CancellationToken.None);
+            Check(events.Any(x => x.Text == "fixture-model"));
+            settings.Providers[AiProvider.Codex].Model = ""; events.Clear();
+            await session.SendAsync("model-check", events.Add, (_, _) => Task.FromResult("拒否"), CancellationToken.None);
+            Check(events.Any(x => x.Text == "fixture-default"));
+        });
+        await Test("Model discovery rejects looping cursors instead of hanging", async () =>
+        {
+            using var page = JsonDocument.Parse("{\"data\":[],\"nextCursor\":\"same\"}");
+            try { await ModelCatalog.ReadPagesAsync((_, _) => Task.FromResult(page.RootElement), CancellationToken.None); throw new Exception("Expected rejection"); }
+            catch (InvalidDataException) { }
+        });
         return failed;
     }
 
@@ -131,7 +156,7 @@ internal static class NativeSessionChecks
     public static async Task<int> FixtureServer()
     {
         Console.InputEncoding = System.Text.Encoding.UTF8; Console.OutputEncoding = System.Text.Encoding.UTF8;
-        int turns = 0; string pending = ""; string turn = "";
+        int turns = 0; bool threadStarted = false; string pending = ""; string turn = "";
         void Send(object value) { Console.WriteLine(JsonSerializer.Serialize(value)); Console.Out.Flush(); }
         void Event(string method, object parameters) => Send(new { method, @params = parameters });
         void Complete(string text)
@@ -150,7 +175,16 @@ internal static class NativeSessionChecks
                 switch (method)
                 {
                     case "initialize": Send(new { id, result = new { } }); break;
+                    case "config/read": Send(new { id, result = new { config = new { model = "fixture-default" } } }); break;
+                    case "model/list":
+                        if (threadStarted || p.GetProperty("includeHidden").GetBoolean()) return 16;
+                        var second = p.GetProperty("cursor").ValueKind == JsonValueKind.String;
+                        var data = second
+                            ? new[] { new { id="internal-b", model="second-model", displayName="Second model", hidden=false }, new { id="hidden", model="hidden", displayName="Hidden", hidden=true }, new { id="internal-a", model="fixture-model", displayName="Fixture model", hidden=false } }
+                            : new[] { new { id="internal-a", model="fixture-model", displayName="Fixture model", hidden=false } };
+                        Send(new { id, result = new { data, nextCursor = second ? null : "page-2" } }); break;
                     case "thread/start":
+                        threadStarted = true;
                         if (p.GetProperty("approvalsReviewer").GetString() != "auto_review" || p.GetProperty("sandbox").GetString() != "workspace-write" || p.GetProperty("approvalPolicy").GetString() != "on-request") return 13;
                         if (p.TryGetProperty("baseInstructions", out _) || p.TryGetProperty("outputSchema", out _) || p.GetProperty("dynamicTools").GetArrayLength() != 1) return 9;
                         Send(new { id, result = new { thread = new { id = "native-thread" } } }); break;
@@ -166,6 +200,7 @@ internal static class NativeSessionChecks
                             if (input.GetArrayLength() != 2 || input[1].GetProperty("type").GetString() != "localImage" || input[1].GetProperty("path").GetString() != @"C:\fixture\図面.png" || !message.Contains(".pdf")) return 15;
                             Complete("attachments verified");
                         }
+                        else if (message == "model-check") Complete(p.GetProperty("model").GetString()!);
                         else if (message == "make")
                         { pending = "trial"; Send(new { id = 900, method = "item/tool/call", @params = new { tool = "solidworks_cli", arguments = new { arguments = new[] { "trial" }, stdin = (string?)null } } }); }
                         else if (message == "approval")

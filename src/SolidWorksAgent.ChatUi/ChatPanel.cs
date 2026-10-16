@@ -14,6 +14,7 @@ public sealed class ChatPanel : UserControl
     private TaskCompletionSource<string>? _answer;
     private readonly Dictionary<string, MessageBubble> _streamed = [];
     private readonly IChatNotifier? _notifier;
+    private readonly Func<ChatSettings, CancellationToken, Task<IReadOnlyList<AgentModel>>> _modelLoader;
     private readonly ComboBox _choice = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
     private readonly TextBox _model = new() { PlaceholderText = "既定のモデル", Dock = DockStyle.Fill };
     private readonly ConversationView _conversation = new();
@@ -36,7 +37,12 @@ public sealed class ChatPanel : UserControl
         : this(solidWorksPid, sessionFactory, null) { }
 
     public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory, IChatNotifier? notifier)
+        : this(solidWorksPid, sessionFactory, notifier, ModelCatalog.ListAsync) { }
+
+    public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory, IChatNotifier? notifier,
+        Func<ChatSettings, CancellationToken, Task<IReadOnlyList<AgentModel>>> modelLoader)
     {
+        _modelLoader = modelLoader;
         _solidWorksPid = solidWorksPid;
         _sessionFactory = sessionFactory ?? AgentSession.Create;
         _testing = sessionFactory is not null;
@@ -92,15 +98,13 @@ public sealed class ChatPanel : UserControl
         });
         _selectModel.Click += async (_, _) => await RunSettingsActionAsync(() =>
         {
-            using var dialog = new Form { Text = "モデル（空欄で既定）", Size = new Size(400, 160), StartPosition = FormStartPosition.CenterParent, Font = Font };
-            var field = new TextBox { Text = _model.Text, Dock = DockStyle.Top };
-            var save = new Button { Text = "保存", Dock = DockStyle.Bottom, DialogResult = DialogResult.OK };
-            dialog.Controls.Add(field); dialog.Controls.Add(save); dialog.AcceptButton = save;
+            using var dialog = new ModelSelectionDialog(_settings.Provider, _model.Text,
+                token => _modelLoader(_settings, token));
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 var options = _settings.Providers[_settings.Provider];
                 var previous = options.Model;
-                options.Model = field.Text.Trim();
+                options.Model = dialog.SelectedModel;
                 try { if (!_testing) _settings.Save(); }
                 catch { options.Model = previous; throw; }
                 _model.Text = options.Model;
