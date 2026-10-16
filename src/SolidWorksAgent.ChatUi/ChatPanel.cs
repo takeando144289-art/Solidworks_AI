@@ -17,7 +17,7 @@ public sealed class ChatPanel : UserControl
     private readonly ComboBox _choice = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
     private readonly TextBox _model = new() { PlaceholderText = "既定のモデル", Dock = DockStyle.Fill };
     private readonly RichTextBox _conversation = new() { ReadOnly = true, Dock = DockStyle.Fill, BackColor = Color.White, BorderStyle = BorderStyle.None, DetectUrls = false };
-    private readonly TextBox _input = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "例：直径30 mm、長さ20 mmの円柱を作って" };
+    private readonly ChatInputBox _input = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, PlaceholderText = "例：直径30 mm、長さ20 mmの円柱を作って" };
     private readonly Button _send = new() { Text = "送信", AutoSize = true };
     private readonly Button _cancel = new() { Text = "停止", AutoSize = true, Enabled = false };
     private readonly Button _configure = new() { Text = "設定", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 4, 0) };
@@ -100,7 +100,7 @@ public sealed class ChatPanel : UserControl
         {
             await ResetSessionsAsync(); _conversation.Clear(); Append("案内", "新しい会話を開始しました。");
         });
-        _input.KeyDown += async (_, e) => { if (!e.Shift && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await SendAsync(); } };
+        _input.SubmitRequested += async (_, _) => await SendAsync();
         Append("案内", "選んだAIと直接やり取りできます。調査・操作・修正はAI自身が進めます。停止するときは「やめて」と入力してください。\nEnterで送信、Shift+Enterで改行。");
         _cancel.Visible = false; _status.Text = "";
         if (settingsError is not null) Append("設定エラー", settingsError);

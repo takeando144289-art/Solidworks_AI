@@ -64,6 +64,48 @@ internal static class Program
                 var task = f.Send("作成して"); await f.Send("やめて"); await task;
                 Check(f.Session.Messages.Count == 1);
             });
+            await Test("Enter in focused input sends once without a button click", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Input.Text = "Enterで送る";
+                await f.PressEnter(false);
+                Check(f.Session.Messages.SequenceEqual(new[] { "Enterで送る" }));
+                Check(f.Input.Text == "");
+            });
+            await Test("Shift Enter inserts a newline at the caret without sending", async () =>
+            {
+                using var f = new Fixture(window);
+                f.Input.Text = "前後"; f.Input.Select(1, 0);
+                await f.PressEnter(true);
+                Check(f.Input.Text == "前\r\n後" && f.Session.Messages.Count == 0);
+                await f.PressEnter(false);
+                Check(f.Session.Messages.Single() == "前\r\n後");
+            });
+            await Test("IME confirmation Enter does not send; a subsequent Enter does", async () =>
+            {
+                using var f = new Fixture(window);
+                foreach (var release in new[] { (Message: 0x0101U, Key: 13), (Message: 0x0291U, Key: 13), (Message: 0x0101U, Key: 229) })
+                {
+                    var previous = f.Session.Messages.Count;
+                    f.Input.Text = "日本語"; f.Input.Focus();
+                    SendMessage(f.Input.Handle, 0x010D, 0, 0); // WM_IME_STARTCOMPOSITION
+                    SendMessage(f.Input.Handle, 0x0100, 13, 1);
+                    SendMessage(f.Input.Handle, 0x010E, 0, 0); // WM_IME_ENDCOMPOSITION
+                    SendMessage(f.Input.Handle, 0x0100, 13, 1); // same confirmation key
+                    SendMessage(f.Input.Handle, release.Message, release.Key, unchecked((nint)0xC0000001));
+                    Check(f.Session.Messages.Count == previous && f.Input.Text == "日本語");
+                    await f.PressEnter(false);
+                    Check(f.Session.Messages.Count == previous + 1 && f.Session.Messages.Last() == "日本語");
+                }
+            });
+            await Test("Shift Enter replaces a selection and empty Enter does not send", async () =>
+            {
+                using var f = new Fixture(window);
+                await f.PressEnter(false); Check(f.Session.Messages.Count == 0);
+                f.Input.Text = "前選択後"; f.Input.Select(1, 2);
+                await f.PressEnter(true);
+                Check(f.Input.Text == "前\r\n後" && f.Input.SelectionStart == 3 && f.Session.Messages.Count == 0);
+            });
             await Test("Model button opens dialog and saves selection", async () =>
             {
                 using var f = new Fixture(window);
@@ -112,7 +154,8 @@ internal static class Program
             window.Show();
             while (!window.IsDisposed && GetMessage(out var message, 0, 0, 0) > 0)
             {
-                TranslateMessage(in message); DispatchMessage(in message);
+                if (!IsDialogMessage(window.Handle, ref message))
+                { TranslateMessage(in message); DispatchMessage(in message); }
             }
         }
         else Application.Run(window);
@@ -123,6 +166,11 @@ internal static class Program
     [DllImport("user32.dll")] static extern int GetMessage(out NativeMessage message, nint window, uint first, uint last);
     [DllImport("user32.dll")] static extern bool TranslateMessage(in NativeMessage message);
     [DllImport("user32.dll")] static extern nint DispatchMessage(in NativeMessage message);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool IsDialogMessage(nint window, ref NativeMessage message);
+    [DllImport("user32.dll")] static extern nint SendMessage(nint window, uint message, nint wparam, nint lparam);
+    [DllImport("user32.dll")] static extern bool PostMessage(nint window, uint message, nint wparam, nint lparam);
+    [DllImport("user32.dll")] static extern bool GetKeyboardState(byte[] state);
+    [DllImport("user32.dll")] static extern bool SetKeyboardState(byte[] state);
     static void Check(bool condition) { if (!condition) throw new Exception("Assertion failed"); }
     sealed class Fixture : IDisposable
     {
@@ -135,6 +183,23 @@ internal static class Program
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         public T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;
+        public TextBox Input => Field<TextBox>("_input");
+        public async Task PressEnter(bool shift)
+        {
+            Check(Input.Focus());
+            var saved = new byte[256]; Check(GetKeyboardState(saved));
+            var state = (byte[])saved.Clone();
+            state[0x10] = state[0xA0] = shift ? (byte)0x80 : (byte)0;
+            state[0x11] = state[0x12] = 0;
+            try
+            {
+                Check(SetKeyboardState(state));
+                Check(PostMessage(Input.Handle, 0x100, 13, 1));
+                Check(PostMessage(Input.Handle, 0x101, 13, unchecked((nint)0xC0000001)));
+                await Task.Delay(80);
+            }
+            finally { SetKeyboardState(saved); }
+        }
         public void ClickDialogButton(string name, Action<Form> act)
         {
             bool seen = false;

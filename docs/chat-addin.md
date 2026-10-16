@@ -331,3 +331,23 @@ The UI update uses the existing V7 identity. Replace the UI DLL/PDB in the regis
 `artifacts\chat-auto-review\addin` package while SOLIDWORKS is closed, keeping a backup
 of the previous files. No COM re-registration is required. Restart SOLIDWORKS to load
 the update.
+
+## Enter and Shift+Enter in the native task pane (2026-10-16)
+
+The chat input now explicitly claims Enter via `WM_GETDLGCODE` and enables
+`AcceptsReturn`. Its key handler submits on Enter and inserts one newline at the
+caret (replacing the selection) on Shift+Enter. IME composition/confirmation is
+handled separately so confirming Japanese text does not submit the chat.
+Only the chat input claims Enter; no global keyboard hook or SOLIDWORKS shortcut
+configuration is changed.
+
+The Windows test host now calls `IsDialogMessage` before dispatching native
+messages, reproducing the parent dialog's handling of Enter. The previous input
+passed both keyboard tests in a standalone WinForms loop but failed both in this
+native dialog loop. The replacement passes all 15 UI checks in both loops,
+including queued Enter/Shift+Enter messages, empty input, selection replacement,
+and simulated IME composition messages. A real Japanese IME and physical keystrokes
+inside SOLIDWORKS still need user verification. Build/publish completed with no
+warnings/errors.
+
+References: [WM_GETDLGCODE](https://learn.microsoft.com/en-us/windows/win32/dlgbox/wm-getdlgcode).
