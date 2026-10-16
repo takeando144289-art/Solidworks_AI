@@ -9,6 +9,10 @@ public sealed record AgentQuestion(string Text, string[] Options);
 public interface IAgentSession : IAsyncDisposable
 {
     Task SteerAsync(string message, CancellationToken token);
+    Task SteerAsync(AgentMessage message, CancellationToken token) => SteerAsync(message.ToPrompt(), token);
+    Task SendAsync(AgentMessage message, Action<AgentEvent> display,
+        Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token) =>
+        SendAsync(message.ToPrompt(), display, ask, token);
     Task SendAsync(string message, Action<AgentEvent> display,
         Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token);
 }

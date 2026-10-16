@@ -50,6 +50,31 @@ internal static class NativeSessionChecks
             }
             return Task.CompletedTask;
         });
+        await Test("Attachments keep independent snapshots and reject missing files", async () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "sw-attachment-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+            try
+            {
+                var source = Path.Combine(root, "図面 reference.txt"); await File.WriteAllTextAsync(source, "original");
+                var first = await AttachmentStore.ImportAsync(root, [source], []);
+                await File.WriteAllTextAsync(source, "changed");
+                var second = await AttachmentStore.ImportAsync(root, [source], first);
+                Check(File.ReadAllText(first[0].Path) == "original" && File.ReadAllText(second[0].Path) == "changed" && first[0].Path != second[0].Path);
+                try { await AttachmentStore.ImportAsync(root, [source + ".missing"], []); throw new Exception("Expected missing file rejection"); }
+                catch (FileNotFoundException) { }
+                Check(File.ReadAllText(source) == "changed");
+            }
+            finally { Directory.Delete(root, true); }
+        });
+        await Test("Codex sends images as localImage and files as reference manifests", async () =>
+        {
+            await using var session = new CodexSession(Settings(Environment.ProcessPath!), 123);
+            var events = new List<AgentEvent>();
+            var message = new AgentMessage("attachments", [new("図面.png", @"C:\fixture\図面.png", 10), new("寸法.pdf", @"C:\fixture\寸法.pdf", 20)]);
+            await session.SendAsync(message, events.Add, (_, _) => Task.FromResult("拒否"), CancellationToken.None);
+            Check(events.Any(e => e.Text == "attachments verified"));
+            Check(message.ToPrompt().Contains("reference files") && message.ToPrompt().Contains("fixture"));
+        });
         return failed;
     }
 
@@ -74,6 +99,20 @@ internal static class NativeSessionChecks
         await session.SendAsync("This is a synthetic integration test. No real CAD or filesystem work is requested. Use only solidworks_cli: first arguments=[create, trial], stdin=null. If it fails, inspect via info then retry with corrected as instructed by the tool. Report the verified test result. Do not use other tools.", e => { events.Add(e); if(e.Kind != "delta") Console.WriteLine(e.Kind + ": " + e.Text); }, (_, _) => Task.FromResult("拒否"), token.Token);
         Console.WriteLine("Native tool calls: " + calls);
         return calls >= 3 && events.Any(e => e.Kind == "message") ? 0 : 1;
+    }
+
+    public static async Task<int> AttachmentLive(string[] args)
+    {
+        var settings = Settings(args[0]); settings.ProjectDirectory = args[1];
+        var attachments = await AttachmentStore.ImportAsync(settings.ProjectDirectory, args.Skip(2), []);
+        var messages = new List<string>();
+        await using var session = new CodexSession(settings, 123, (_, _) => throw new InvalidOperationException("This test must not operate CAD."));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        await session.SendAsync(new AgentMessage("Read-only attachment test: inspect the attached image visually and read the attached text file with your native file tools. Report the code printed inside the image, describe the colored shapes, and report the code from the text file. Respond in English. Do not change any files or access SOLIDWORKS. Do not guess unreadable contents.", attachments),
+            e => { if (e.Kind == "message") { messages.Add(e.Text); Console.WriteLine(e.Text); } },
+            (_, _) => Task.FromResult("拒否"), timeout.Token);
+        var answer = string.Join("\n", messages);
+        return answer.Contains("VISION-4829") && answer.Contains("REF-7392") ? 0 : 1;
     }
 
     public static async Task<int> ReviewLive(string[] args)
@@ -121,7 +160,13 @@ internal static class NativeSessionChecks
                         turn = "turn" + ++turns;
                         Send(new { id, result = new { turn = new { id = turn } } });
                         var message = p.GetProperty("input")[0].GetProperty("text").GetString();
-                        if (message == "make")
+                        if (message?.StartsWith("attachments\n") == true)
+                        {
+                            var input = p.GetProperty("input");
+                            if (input.GetArrayLength() != 2 || input[1].GetProperty("type").GetString() != "localImage" || input[1].GetProperty("path").GetString() != @"C:\fixture\図面.png" || !message.Contains(".pdf")) return 15;
+                            Complete("attachments verified");
+                        }
+                        else if (message == "make")
                         { pending = "trial"; Send(new { id = 900, method = "item/tool/call", @params = new { tool = "solidworks_cli", arguments = new { arguments = new[] { "trial" }, stdin = (string?)null } } }); }
                         else if (message == "approval")
                         { pending = "approval"; Send(new { id = 900, method = "item/commandExecution/requestApproval", @params = new { command = "fixture command", reason = "Fixture native approval" } }); }

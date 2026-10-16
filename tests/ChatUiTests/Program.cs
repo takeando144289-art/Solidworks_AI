@@ -146,6 +146,44 @@ internal static class Program
                 await f.Send("エラー後も会話");
                 Check(f.Session.Messages.Count == 2);
             });
+            await Test("File drop attaches a snapshot, sends it with the prompt and preserves original", async () =>
+            {
+                using var f = new Fixture(window); using var files = new AttachmentFixture(f);
+                await f.DropFiles(files.Source);
+                Check(f.Field<List<ChatAttachment>>("_attachments").Count == 1 && f.Field<FlowLayoutPanel>("_attachmentList").Visible);
+                Check(f.Session.Messages.Count == 0);
+                await f.Send("この図面をモデル化して");
+                var sent = f.Session.Inputs.Single();
+                Check(sent.Text == "この図面をモデル化して" && sent.Attachments.Count == 1);
+                Check(File.ReadAllText(sent.Attachments[0].Path) == "reference" && File.ReadAllText(files.Source) == "reference");
+                Check(f.Field<List<ChatAttachment>>("_attachments").Count == 0 && f.Text.Contains("参考 図面.txt"));
+            });
+            await Test("Removing an attachment prevents it from being sent", async () =>
+            {
+                using var f = new Fixture(window); using var files = new AttachmentFixture(f);
+                await f.DropFiles(files.Source);
+                var chip = f.Field<FlowLayoutPanel>("_attachmentList").Controls[0];
+                chip.Controls.OfType<Button>().Single().PerformClick();
+                await f.Send("テキストだけ");
+                Check(f.Session.Inputs.Single().Attachments.Count == 0 && File.Exists(files.Source));
+            });
+            await Test("Failed send retains attachments and draft for retry", async () =>
+            {
+                using var f = new Fixture(window); using var files = new AttachmentFixture(f);
+                await f.DropFiles(files.Source);
+                f.Session.Run = (_, _, _, _) => throw new IOException("fixture send failed");
+                await f.Send("図面から作って");
+                Check(f.Input.Text == "図面から作って" && f.Field<List<ChatAttachment>>("_attachments").Count == 1);
+                Check(f.Text.Contains("fixture send failed"));
+            });
+            await Test("Attachment-only message works and new chat clears unsent attachments", async () =>
+            {
+                using var f = new Fixture(window); using var files = new AttachmentFixture(f);
+                await f.DropFiles(files.Source); await f.Send("");
+                Check(f.Session.Inputs.Single().Attachments.Count == 1);
+                await f.DropFiles(files.Source); f.Field<Button>("_newChat").PerformClick(); await Task.Yield();
+                Check(f.Field<List<ChatAttachment>>("_attachments").Count == 0);
+            });
             Console.WriteLine($"{count - failures}/{count} UI workflow checks passed"); window.Close();
         };
         if (args.Contains("--native-host"))
@@ -183,6 +221,16 @@ internal static class Program
             form.Controls.Add(Panel); Panel.BringToFront();
         }
         public T Field<T>(string name) => (T)typeof(ChatPanel).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Panel)!;
+        public async Task DropFiles(string path)
+        {
+            var data = new DataObject(DataFormats.FileDrop, new[] { path });
+            var args = new DragEventArgs(data, 0, 0, 0, DragDropEffects.Copy, DragDropEffects.None);
+            typeof(Control).GetMethod("OnDragEnter", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Input, [args]);
+            Check(args.Effect == DragDropEffects.Copy);
+            typeof(Control).GetMethod("OnDragDrop", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Input, [args]);
+            for (var i = 0; i < 200 && Field<bool>("_importing"); i++) await Task.Delay(10);
+            Check(!Field<bool>("_importing"));
+        }
         public TextBox Input => Field<TextBox>("_input");
         public async Task PressEnter(bool shift)
         {
@@ -225,9 +273,25 @@ internal static class Program
         }
         public void Dispose() => Panel.Dispose();
     }
+    sealed class AttachmentFixture : IDisposable
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(), "sw-ui-attachment-" + Guid.NewGuid().ToString("N"));
+        public string Source => Path.Combine(_root, "参考 図面.txt");
+        public AttachmentFixture(Fixture fixture)
+        {
+            Directory.CreateDirectory(_root); File.WriteAllText(Source, "reference");
+            fixture.Field<ChatSettings>("_settings").ProjectDirectory = _root;
+        }
+        public void Dispose() => Directory.Delete(_root, true);
+    }
     sealed class FakeSession : IAgentSession
     {
         public List<string> Messages { get; } = [];
+        public List<AgentMessage> Inputs { get; } = [];
+        public Task SendAsync(AgentMessage message, Action<AgentEvent> display, Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token)
+        {
+            Inputs.Add(message); return SendAsync(message.Text, display, ask, token);
+        }
         public List<string> Steering { get; } = [];
         public Func<string, Action<AgentEvent>, Func<AgentQuestion, CancellationToken, Task<string>>, CancellationToken, Task>? Run;
         public Task SendAsync(string message, Action<AgentEvent> display, Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token)

@@ -25,7 +25,11 @@ public sealed class ChatPanel : UserControl
     private readonly Button _newChat = new() { Text = "新しいチャット", Dock = DockStyle.Fill, Margin = Padding.Empty };
     private readonly Label _status = new() { Text = "準備完了", Dock = DockStyle.Fill, AutoEllipsis = true, ForeColor = Color.FromArgb(71, 85, 105) };
     private CancellationTokenSource? _request;
-    private bool _busy;
+    private bool _busy, _importing;
+    private readonly List<ChatAttachment> _attachments = [];
+    private readonly FlowLayoutPanel _attachmentList = new() { Dock = DockStyle.Fill, AutoScroll = true, WrapContents = false, Visible = false };
+    private readonly RowStyle _attachmentRow = new(SizeType.Absolute, 0);
+    private readonly Button _attach = new() { Text = "＋ 添付", AutoSize = true };
 
     public ChatPanel(int solidWorksPid, Func<ChatSettings, int, IAgentSession>? sessionFactory = null)
     {
@@ -39,10 +43,11 @@ public sealed class ChatPanel : UserControl
         Font = new Font("Yu Gothic UI", 9F);
         BackColor = Color.White;
         MinimumSize = new Size(280, 280);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(14) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(14) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         foreach (var height in new[] { 36F, 34F, -1F, 24F, 80F, 38F })
             layout.RowStyles.Add(height < 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
+        layout.RowStyles.Insert(4, _attachmentRow);
         var top = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104)); top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         top.Controls.Add(_choice, 0, 0); top.Controls.Add(new Label { Text = "SolidWorks", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
@@ -55,9 +60,10 @@ public sealed class ChatPanel : UserControl
         layout.Controls.Add(_conversation, 0, 2); layout.Controls.Add(_status, 0, 3);
         _input.BorderStyle = BorderStyle.FixedSingle;
         _input.PlaceholderText = "指示を入力 · Enterで送信、Shift+Enterで改行";
-        layout.Controls.Add(_input, 0, 4);
+        layout.Controls.Add(_attachmentList, 0, 4);
+        layout.Controls.Add(_input, 0, 5);
         var sendRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-        sendRow.Controls.AddRange([_send, _cancel]); layout.Controls.Add(sendRow, 0, 5); Controls.Add(layout);
+        sendRow.Controls.AddRange([_send, _cancel, _attach]); layout.Controls.Add(sendRow, 0, 6); Controls.Add(layout);
         _choice.Items.AddRange(Enum.GetNames<AiProvider>());
         _choice.SelectedIndex = (int)_settings.Provider;
         _model.Text = _settings.Providers[_settings.Provider].Model;
@@ -98,18 +104,78 @@ public sealed class ChatPanel : UserControl
         });
         _newChat.Click += async (_, _) => await RunSettingsActionAsync(async () =>
         {
-            await ResetSessionsAsync(); _conversation.Clear(); Append("案内", "新しい会話を開始しました。");
+            await ResetSessionsAsync(); _attachments.Clear(); RefreshAttachments(); _conversation.Clear(); Append("案内", "新しい会話を開始しました。");
         });
         _input.SubmitRequested += async (_, _) => await SendAsync();
-        Append("案内", "選んだAIと直接やり取りできます。調査・操作・修正はAI自身が進めます。停止するときは「やめて」と入力してください。\nEnterで送信、Shift+Enterで改行。");
+        _attach.Click += async (_, _) =>
+        {
+            if (_busy || _importing) return;
+            try
+            {
+                using var dialog = new OpenFileDialog { Title = "画像・図面・参考ファイルを添付", Multiselect = true, Filter = "すべてのファイル|*.*" };
+                if (dialog.ShowDialog(this) == DialogResult.OK) await AddAttachmentsAsync(dialog.FileNames);
+            }
+            catch (Exception ex) { Append("添付エラー", ex.Message); }
+        };
+        RegisterDropTarget(this);
+        Append("案内", "選んだAIと直接やり取りできます。調査・操作・修正はAI自身が進めます。停止するときは「やめて」と入力してください。\nEnterで送信、Shift+Enterで改行。画像やファイルをドロップ、または「＋ 添付」で追加できます。");
         _cancel.Visible = false; _status.Text = "";
         if (settingsError is not null) Append("設定エラー", settingsError);
         if (solidWorksPid <= 0) Append("プレビュー", "SolidWorksに接続していません。アドインとして開くとCAD操作を利用できます。");
     }
 
+    private void RegisterDropTarget(Control control)
+    {
+        control.AllowDrop = true;
+        control.DragEnter += (_, e) =>
+        {
+            try
+            {
+                e.Effect = !_busy && !_importing && e.Data?.GetDataPresent(DataFormats.FileDrop) == true
+                    && (e.AllowedEffect & DragDropEffects.Copy) != 0 ? DragDropEffects.Copy : DragDropEffects.None;
+            }
+            catch (Exception) { e.Effect = DragDropEffects.None; }
+        };
+        control.DragDrop += async (_, e) =>
+        {
+            try { if (e.Data?.GetData(DataFormats.FileDrop) is string[] paths) await AddAttachmentsAsync(paths); }
+            catch (Exception ex) { if (!IsDisposed) Append("添付エラー", ex.Message); }
+        };
+        foreach (Control child in control.Controls) RegisterDropTarget(child);
+    }
+
+    private async Task AddAttachmentsAsync(string[] paths)
+    {
+        if (_busy || _importing || IsDisposed) return;
+        _importing = true; Busy(_busy); _status.Text = "添付ファイルを読み込んでいます…";
+        try
+        {
+            var imported = await AttachmentStore.ImportAsync(_settings.ProjectDirectory, paths, _attachments);
+            if (IsDisposed) return;
+            _attachments.AddRange(imported); RefreshAttachments(); _input.Focus();
+        }
+        catch (Exception ex) { if (!IsDisposed) Append("添付エラー", ex.Message); }
+        finally { _importing = false; Busy(_busy); if (!IsDisposed) _status.Text = ""; }
+    }
+
+    private void RefreshAttachments()
+    {
+        while (_attachmentList.Controls.Count > 0) _attachmentList.Controls[0].Dispose();
+        foreach (var attachment in _attachments)
+        {
+            var chip = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 5, 2) };
+            var name = new Label { Text = attachment.Name, AutoEllipsis = true, Width = 150, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
+            var remove = new Button { Text = "×", Width = 27, Height = 26, AccessibleName = attachment.Name + " を取り外す" };
+            remove.Click += (_, _) => { if (!_busy && !_importing) { _attachments.Remove(attachment); RefreshAttachments(); } };
+            chip.Controls.Add(name); chip.Controls.Add(remove); _attachmentList.Controls.Add(chip); RegisterDropTarget(chip);
+        }
+        _attachmentList.Visible = _attachments.Count > 0;
+        _attachmentRow.Height = _attachments.Count > 0 ? 58 : 0;
+    }
+
     private async Task RunSettingsActionAsync(Func<Task> action)
     {
-        if (IsDisposed || Disposing || _busy) return;
+        if (IsDisposed || Disposing || _busy || _importing) return;
         try { await action(); }
         catch (Exception ex)
         {
@@ -129,7 +195,7 @@ public sealed class ChatPanel : UserControl
     public bool BeginConnectionCheck()
     {
         // Exercise the same chat path as a typed request without replacing a draft.
-        if (_busy || !string.IsNullOrWhiteSpace(_input.Text)) return false;
+        if (_busy || _importing || _attachments.Count > 0 || !string.IsNullOrWhiteSpace(_input.Text)) return false;
         _input.Text = "接続できているか確認して";
         _ = SendAsync();
         return true;
@@ -137,9 +203,10 @@ public sealed class ChatPanel : UserControl
     private void Busy(bool value)
     {
         if (IsDisposed) return;
-        _busy = value; _send.Enabled = !value; _choice.Enabled = !value; _configure.Enabled = !value;
-        _model.Enabled = !value; _selectModel.Enabled = !value; _newChat.Enabled = !value;
-        _cancel.Visible = value; _cancel.Enabled = value; _send.Enabled = true;
+        _busy = value;
+        var editable = !value && !_importing;
+        _choice.Enabled = _configure.Enabled = _model.Enabled = _selectModel.Enabled = _newChat.Enabled = _attach.Enabled = _attachmentList.Enabled = editable;
+        _cancel.Visible = value; _cancel.Enabled = value; _send.Enabled = !_importing;
     }
     private void Append(string role, string text)
     {
@@ -185,7 +252,7 @@ public sealed class ChatPanel : UserControl
 
     private async Task SendAsync()
     {
-        if (string.IsNullOrWhiteSpace(_input.Text)) return;
+        if (_importing || (string.IsNullOrWhiteSpace(_input.Text) && _attachments.Count == 0)) return;
         var prompt = _input.Text; // User text is forwarded verbatim; the pane never converts it into a plan.
         if (_busy)
         {
@@ -200,7 +267,11 @@ public sealed class ChatPanel : UserControl
             }
             return;
         }
-        _input.Clear(); Append("あなた", prompt);
+        var attached = _attachments.ToArray();
+        var message = new AgentMessage(string.IsNullOrWhiteSpace(prompt) ? "添付ファイルを確認してください。" : prompt, attached);
+        if (attached.Any(a => !File.Exists(a.Path))) { Append("添付エラー", "添付ファイルが見つかりません。取り外して追加し直してください。"); return; }
+        _input.Clear(); _attachments.Clear(); RefreshAttachments();
+        Append("あなた", prompt + (attached.Length == 0 ? "" : "\n添付：" + string.Join("、", attached.Select(a => a.Name))));
         if (ChatIntents.Parse(prompt) == ChatIntent.Cancel) { _status.Text = "実行中の処理はありません"; return; }
         Busy(true); _request = new CancellationTokenSource(); _streamed.Clear(); _streamItem = null;
         try
@@ -211,11 +282,23 @@ public sealed class ChatPanel : UserControl
             { session = _sessionFactory(_settings, _solidWorksPid); _sessions[_settings.Provider] = session; }
             _activeSession = session;
             _status.Text = _settings.Provider + " に送信しています…";
-            await session.SendAsync(prompt, Display, AskAsync, _request.Token);
+            await session.SendAsync(message, Display, AskAsync, _request.Token);
             if (!IsDisposed) _status.Text = "";
         }
         catch (OperationCanceledException) { if (!IsDisposed) _status.Text = "停止しました"; }
-        catch (Exception ex) { Append("接続エラー", ex.Message); if (!IsDisposed) _status.Text = "AI接続を確認してください"; }
+        catch (Exception ex)
+        {
+            Append("接続エラー", ex.Message);
+            if (!IsDisposed)
+            {
+                _status.Text = "AI接続を確認してください";
+                if (attached.Length > 0)
+                {
+                    _attachments.AddRange(attached); RefreshAttachments();
+                    if (string.IsNullOrEmpty(_input.Text)) _input.Text = prompt;
+                }
+            }
+        }
         finally { _answer = null; _activeSession = null; _request?.Dispose(); _request = null; Busy(false); }
     }
 

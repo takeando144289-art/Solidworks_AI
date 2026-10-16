@@ -15,3 +15,5 @@ workspace/assemblies/*.SLDASM
 workspace/drawings/*.SLDDRW
 workspace/exports/*
 !workspace/**/.gitkeep
+
+workspace/chat-attachments/

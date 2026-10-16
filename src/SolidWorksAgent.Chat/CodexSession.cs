@@ -25,7 +25,11 @@ public sealed class CodexSession(ChatSettings settings, int processId,
     private string _diagnostics = "";
     private bool _disposed;
 
-    public async Task SendAsync(string message, Action<AgentEvent> display,
+    public Task SendAsync(string message, Action<AgentEvent> display,
+        Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token) =>
+        SendAsync(new AgentMessage(message), display, ask, token);
+
+    public async Task SendAsync(AgentMessage message, Action<AgentEvent> display,
         Func<AgentQuestion, CancellationToken, Task<string>> ask, CancellationToken token)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -37,7 +41,7 @@ public sealed class CodexSession(ChatSettings settings, int processId,
             _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _turn = null;
             token.ThrowIfCancellationRequested();
-            var result = await CallAsync("turn/start", new { threadId = _thread, approvalPolicy = "on-request", approvalsReviewer = "auto_review", input = new[] { new { type = "text", text = message } }, model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model }, CancellationToken.None);
+            var result = await CallAsync("turn/start", new { threadId = _thread, approvalPolicy = "on-request", approvalsReviewer = "auto_review", input = message.ToCodexInput(), model = string.IsNullOrWhiteSpace(settings.Providers[AiProvider.Codex].Model) ? null : settings.Providers[AiProvider.Codex].Model }, CancellationToken.None);
             _turn = result.GetProperty("turn").GetProperty("id").GetString();
             try { await _finished.Task.WaitAsync(token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -56,10 +60,12 @@ public sealed class CodexSession(ChatSettings settings, int processId,
         }
     }
 
-    public async Task SteerAsync(string message, CancellationToken token)
+    public Task SteerAsync(string message, CancellationToken token) => SteerAsync(new AgentMessage(message), token);
+
+    public async Task SteerAsync(AgentMessage message, CancellationToken token)
     {
         if (_thread is null || _turn is null) throw new InvalidOperationException("接続の開始処理中です。しばらくしてから送信してください。");
-        await CallAsync("turn/steer", new { threadId = _thread, expectedTurnId = _turn, input = new[] { new { type = "text", text = message } } }, token);
+        await CallAsync("turn/steer", new { threadId = _thread, expectedTurnId = _turn, input = message.ToCodexInput() }, token);
     }
 
     private async Task StartAsync(CancellationToken token)

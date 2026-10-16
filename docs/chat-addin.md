@@ -351,3 +351,40 @@ inside SOLIDWORKS still need user verification. Build/publish completed with no
 warnings/errors.
 
 References: [WM_GETDLGCODE](https://learn.microsoft.com/en-us/windows/win32/dlgbox/wm-getdlgcode).
+
+## Attach images and reference files (2026-10-16)
+
+Drag one or more files from Windows Explorer onto the chat, or use **＋ 添付**.
+The filenames appear above the input box; **×** removes an unsent attachment.
+Then enter an instruction such as `この図面をモデル化して。寸法はmmです。` and send.
+Dropping alone does not contact the AI. Attachments can be added while the agent is
+idle. Sending just attachments asks the agent to inspect them. If sending fails,
+the attachments and draft remain available for retry.
+
+Codex receives PNG, JPEG and WebP files through native `localImage` inputs alongside
+the user message. Other files (including PDFs, CAD, text, BMP and TIFF) are provided
+as local references for the agent's native tools to read, render or inspect. Claude
+and Gemini receive the reference paths through their existing CLI prompts and use
+their own file tools; those providers' actual file-reading capability depends on
+the installed CLI and model. No new API key is required. A drawing still needs enough
+information to determine dimensions; the agent is instructed to ask about missing
+sizes rather than claim it inspected unavailable contents.
+
+Up to 20 files / 100 MB total can be attached per message. Folders and virtual mail
+attachments are not accepted; save those files locally first. Files are copied into
+unique folders under `workspace/chat-attachments`, so equal names cannot overwrite
+each other and the originals are preserved. These copies are ignored by Git and
+retained for subsequent turns; removing a chip or starting a new chat does not delete
+referenced disk files. Unsaved attachment chips are not restored after restarting
+the pane. Native CAD files that depend on sibling references may require those
+references to be supplied separately.
+
+Validation: full solution build and existing core/chat checks passed, plus two
+attachment transport/storage checks and four UI attachment workflows. All 19 UI
+checks passed under both managed and native dialog loops. A real logged-in Codex
+session read the code printed only inside a synthetic image, described its two blue
+squares and red circle, and independently read the code in an attached text file.
+That check did not access SOLIDWORKS or modify CAD. Explorer-to-SOLIDWORKS drag input
+and other providers were not tested on the live host.
+
+Protocol reference: [Codex app-server](https://learn.chatgpt.com/docs/app-server).
