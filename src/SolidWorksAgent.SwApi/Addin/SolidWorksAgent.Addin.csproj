@@ -19,6 +19,7 @@
       <EmbedInteropTypes>false</EmbedInteropTypes>
       <Private>true</Private>
     </Reference>
+    <Content Include="Assets\taskpane-*.png" Exclude="Assets\taskpane-source.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Compile Include="..\Interop\ComDispatch.cs" Link="Interop\ComDispatch.cs" />
   </ItemGroup>
   <Target Name="CheckSolidWorksSdk" BeforeTargets="ResolveReferences" Condition="!Exists('$(SolidWorksInteropDirectory)\SolidWorks.Interop.swpublished.dll')">

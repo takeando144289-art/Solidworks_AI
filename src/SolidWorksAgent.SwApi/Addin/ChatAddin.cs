@@ -37,7 +37,7 @@ public sealed class ChatAddin : ISwAddin, IChatAddinAutomation
             if (!application.SetAddinCallbackInfo2(0L, this, Cookie))
                 throw new InvalidOperationException("Cannot register add-in callbacks.");
             _panel = new ChatPanel(Process.GetCurrentProcess().Id);
-            _taskPane = application.CreateTaskpaneView2("", "SolidWorks AI Chat")
+            _taskPane = CreateTaskPane(application)
                 ?? throw new InvalidOperationException("Task pane creation failed.");
             if (!_taskPane.DisplayWindowFromHandlex64(_panel.Handle.ToInt64())) throw new InvalidOperationException("Cannot attach chat control to the task pane.");
             _panel.Show();
@@ -51,6 +51,20 @@ public sealed class ChatAddin : ISwAddin, IChatAddinAutomation
             DisconnectFromSW();
             return false;
         }
+    }
+
+    private static ITaskpaneView? CreateTaskPane(ISldWorks application)
+    {
+        // Use the add-in location, not SOLIDWORKS's executable/working directory.
+        var folder = Path.Combine(Path.GetDirectoryName(typeof(ChatAddin).Assembly.Location)!, "Assets");
+        var icons = new[] { 20, 32, 40, 64, 96, 128 }
+            .Select(size => Path.Combine(folder, $"taskpane-{size}.png")).ToArray();
+        if (icons.All(File.Exists))
+            return application.CreateTaskpaneView3(icons, "SolidWorks AI Chat");
+
+        // A missing optional image must not prevent access to the chat.
+        Log("Task pane icons missing; using the default icon.");
+        return application.CreateTaskpaneView2("", "SolidWorks AI Chat");
     }
 
     public bool ShowChat() => _taskPane is not null && _taskPane.ShowView();

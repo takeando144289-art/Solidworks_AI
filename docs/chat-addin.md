@@ -418,3 +418,12 @@ That check did not access SOLIDWORKS or modify CAD. Explorer-to-SOLIDWORKS drag 
 and other providers were not tested on the live host.
 
 Protocol reference: [Codex app-server](https://learn.chatgpt.com/docs/app-server).
+
+### Task pane icon
+
+The sidebar uses the supplied artwork in `src/SolidWorksAgent.SwApi/Addin/Assets/taskpane-source.png`.
+The six indexed PNG sizes (20, 32, 40, 64, 96, 128) are included in build/publish output and
+selected by SOLIDWORKS for the display scale through
+[`CreateTaskpaneView3`](https://help.solidworks.com/2025/English/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISldWorks~CreateTaskpaneView3.html).
+Run `scripts/Build-TaskPaneIcons.ps1` on Windows after replacing the source artwork.
+The chat remains accessible with the default icon if the image files are missing.
