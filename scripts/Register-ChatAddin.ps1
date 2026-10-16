@@ -29,7 +29,7 @@ $addinKey = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey("SOFTWARE\Soli
 try {
     $addinKey.SetValue('', 0, [Microsoft.Win32.RegistryValueKind]::DWord)
     $addinKey.SetValue('Title', 'SolidWorks AI Chat')
-    $addinKey.SetValue('Description', 'Chat with Codex, Claude or Gemini using SolidWorksAgent.')
+    $addinKey.SetValue('Description', 'Chat with Codex or Claude using SolidWorksAgent.')
 } finally { $addinKey.Dispose() }
 $startupKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("SOFTWARE\SolidWorks\AddInsStartup\$id")
 try { $startupKey.SetValue('', 1, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $startupKey.Dispose() }

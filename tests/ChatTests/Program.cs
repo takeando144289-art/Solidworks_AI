@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using SolidWorksAgent.Chat;
 
+if (args.FirstOrDefault() == "--claude-live") return await NativeSessionChecks.ClaudeLive(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "app-server") return await NativeSessionChecks.FixtureServer();
 if (args.FirstOrDefault() == "--attachment-live") return await NativeSessionChecks.AttachmentLive(args.Skip(1).ToArray());
 if (args.FirstOrDefault() == "--review-live") return await NativeSessionChecks.ReviewLive(args.Skip(1).ToArray());
@@ -33,6 +34,21 @@ var fixture = """{"reply":"円柱を作成します。","commands":[{"command":"
 CadCommand Cylinder(params CommandArgument[] extras) => new("part create-cylinder", [new("diameter", "30"), new("length", "20"), .. extras]);
 var tests = new List<(string, Action)>
 {
+    ("Legacy Gemini selection falls back without losing settings", () =>
+    {
+        var settings = ChatSettings.FromJson("""{"provider":2,"projectDirectory":"fixture-project","cadExecutable":"fixture-cad","providers":{"Codex":{"executable":"custom-codex.exe","model":"saved-model"},"Gemini":{"executable":"old-gemini.exe","model":"old-model"}}}""");
+        Check(settings.Provider == AiProvider.Codex && settings.ProjectDirectory == "fixture-project" && settings.CadExecutable == "fixture-cad");
+        Check(settings.Providers[AiProvider.Codex].Executable == "custom-codex.exe" && settings.Providers[AiProvider.Codex].Model == "saved-model");
+        Check(settings.Providers[AiProvider.Claude].Executable == "claude.exe" && settings.Providers[AiProvider.Gemini].Model == "old-model");
+        var roundTrip = ChatSettings.FromJson(JsonSerializer.Serialize(settings, ChatProtocol.Json));
+        Check(roundTrip.Provider == AiProvider.Codex && roundTrip.Providers[AiProvider.Gemini].Executable == "old-gemini.exe");
+    }),
+    ("Claude selection and model survive settings load", () =>
+    {
+        var settings = ChatSettings.FromJson("""{"provider":1,"providers":{"Claude":{"executable":"custom-claude.exe","model":"saved-claude"}}}""");
+        Check(settings.Provider == AiProvider.Claude && settings.Providers[AiProvider.Claude].Model == "saved-claude");
+        Check(!new ChatSettings().Providers.ContainsKey(AiProvider.Gemini));
+    }),
     ("API method names do not make execution read-only", () => Check(!ChatIntents.IsReadOnly(new("api execute",[])))),
     ("API metadata discovery is read-only", () => Check(ChatIntents.IsReadOnly(new("api describe",[new("interface","IFeatureManager")])))),
     ("Plate accepts explicit thread positions", () => CommandCatalog.Validate(new("part create-plate",[new("width","150"),new("height","20"),new("thickness","3"),new("radius","5"),new("holes","[[10,10],[20,10]]"),new("thread","M3x0.5")]))),

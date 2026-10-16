@@ -47,6 +47,8 @@ internal static class NativeSessionChecks
                 var args = NativeCliSession.Arguments(provider, "chosen-model", "session-123");
                 Check(args.Contains("--resume") && args.Contains("session-123") && args.Contains("chosen-model"));
                 Check(!args.Contains("--tools") && !args.Contains("--json-schema") && !args.Contains("--extensions"));
+                if (provider == AiProvider.Claude)
+                    Check(args[Array.IndexOf(args, "--permission-mode") + 1] == "auto" && !args.Contains("--dangerously-skip-permissions"));
             }
             return Task.CompletedTask;
         });
@@ -109,6 +111,20 @@ internal static class NativeSessionChecks
         settings.Providers[AiProvider.Codex].Executable = executable; return settings;
     }
     private static void Check(bool condition) { if (!condition) throw new Exception("Assertion failed"); }
+
+    public static async Task<int> ClaudeLive(string[] args)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        var settings = ChatSettings.Load(); settings.Provider = AiProvider.Claude;
+        await using var session = new NativeCliSession(settings, int.Parse(args[0]));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        var events = new List<AgentEvent>();
+        await session.SendAsync("Read-only connection test authorized by the user. Use your native shell to run the supplied Windows CAD CLI with --help, then connect --solidworks-pid " + args[0] + " --json. Do not create, inspect, change, close or save any CAD document or edit any file. Do not change settings. Report the CLI exit code and actual JSON response. If a command fails for a non-permission reason, inspect the error and correct the invocation. Finish with a standalone line CONNECTION_OK only after the CLI returns connected=true for the supplied process. Respond in Japanese.",
+            e => { events.Add(e); Console.WriteLine(e.Kind + ": " + e.Text); },
+            (_, _) => throw new InvalidOperationException("No interactive approval handler"), timeout.Token);
+        Console.WriteLine("Claude session: " + typeof(NativeCliSession).GetField("_session", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(session));
+        return events.Any(e => e.Kind == "message" && e.Text.Split('\n').Any(line => line.Trim() == "CONNECTION_OK")) ? 0 : 1;
+    }
 
     public static async Task<int> Live(string[] args)
     {

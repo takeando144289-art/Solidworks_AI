@@ -75,13 +75,14 @@ public sealed class ChatPanel : UserControl
         layout.Controls.Add(_input, 0, 5);
         var sendRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         sendRow.Controls.AddRange([_send, _cancel, _attach]); layout.Controls.Add(sendRow, 0, 6); Controls.Add(layout);
-        _choice.Items.AddRange(Enum.GetNames<AiProvider>());
-        _choice.SelectedIndex = (int)_settings.Provider;
+        _choice.Items.AddRange(ChatSettings.AvailableProviders.Cast<object>().ToArray());
+        _choice.SelectedItem = _settings.Provider;
         _model.Text = _settings.Providers[_settings.Provider].Model;
         _choice.SelectedIndexChanged += (_, _) =>
         {
             _settings.Providers[_settings.Provider].Model = _model.Text;
-            _settings.Provider = (AiProvider)_choice.SelectedIndex;
+            if (_choice.SelectedItem is not AiProvider provider) return;
+            _settings.Provider = provider;
             _model.Text = _settings.Providers[_settings.Provider].Model;
         };
         _send.Click += async (_, _) => await SendAsync();
@@ -92,7 +93,7 @@ public sealed class ChatPanel : UserControl
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             await ResetSessionsAsync();
             // Update the selection against the old settings before replacing them.
-            _choice.SelectedIndex = (int)dialog.Settings.Provider;
+            _choice.SelectedItem = dialog.Settings.Provider;
             _settings = dialog.Settings;
             _model.Text = _settings.Providers[_settings.Provider].Model;
         });

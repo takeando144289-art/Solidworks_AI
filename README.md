@@ -2,7 +2,7 @@
 
 ## SolidWorks内のAIチャット（Windows）
 
-Codex・Claude・Geminiを選べるタスクペインアドインを追加しています。
+Codex・Claudeを選べるタスクペインアドインを追加しています。
 既存CLIの部品・アセンブリ・図面操作を再利用し、日本語の指示から操作案を作成して実行できます。
 Windows版の各AI CLIと認証を利用します。ビルド、登録、設定、対応範囲は
 [チャットアドインの導入手順](docs/chat-addin.md)を参照してください。

@@ -20,6 +20,22 @@ internal static class Program
                 try { await action(); Console.WriteLine("PASS " + name); }
                 catch (Exception ex) { failures++; Console.WriteLine("FAIL " + name + ": " + ex); }
             }
+            await Test("Only Codex and Claude appear in provider and connection controls", async () =>
+            {
+                using var f = new Fixture(window);
+                var choice = f.Field<ComboBox>("_choice");
+                Check(choice.Items.Cast<AiProvider>().SequenceEqual(new[] { AiProvider.Codex, AiProvider.Claude }));
+                choice.SelectedItem = AiProvider.Claude;
+                Check(f.Field<ChatSettings>("_settings").Provider == AiProvider.Claude);
+                choice.SelectedItem = AiProvider.Codex;
+                Check(f.Field<ChatSettings>("_settings").Provider == AiProvider.Codex);
+                var legacy = new ChatSettings { Provider = AiProvider.Gemini };
+                using var dialog = new SettingsDialog(legacy);
+                var labels = Descendants(dialog).OfType<Label>().Select(x => x.Text).ToArray();
+                Check(labels.Contains("Codex CLI") && labels.Contains("Claude CLI") && !labels.Any(x => x.Contains("Gemini")));
+                Check(dialog.Settings.Provider == AiProvider.Codex && legacy.Provider == AiProvider.Gemini);
+                await Task.CompletedTask;
+            });
             await Test("User request reaches native session verbatim without approval", async () =>
             {
                 using var f = new Fixture(window);

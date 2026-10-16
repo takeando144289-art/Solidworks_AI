@@ -9,7 +9,7 @@ public sealed class SettingsDialog : Form
     private readonly Dictionary<string, TextBox> _fields = [];
     public SettingsDialog(ChatSettings current)
     {
-        Settings = JsonSerializer.Deserialize<ChatSettings>(JsonSerializer.Serialize(current, ChatProtocol.Json), ChatProtocol.Json)!;
+        Settings = ChatSettings.FromJson(JsonSerializer.Serialize(current, ChatProtocol.Json));
         Text = "SolidWorks AI Chat — 接続設定"; Size = new(760, 560); MinimumSize = new(620, 500);
         StartPosition = FormStartPosition.CenterParent; Font = new("Yu Gothic UI", 9);
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, Padding = new Padding(16), AutoScroll = true };
@@ -20,21 +20,21 @@ public sealed class SettingsDialog : Form
         Add("project", "作業フォルダー", Settings.ProjectDirectory, true);
         Add("cad", "swagent.exe", Settings.CadExecutable, false);
         Add("node", "Node.js（npm用）", Settings.NodeExecutable, false);
-        foreach (var provider in Enum.GetValues<AiProvider>()) Add(provider.ToString(), provider + " CLI", Settings.Providers[provider].Executable, false);
+        foreach (var provider in ChatSettings.AvailableProviders) Add(provider.ToString(), provider + " CLI", Settings.Providers[provider].Executable, false);
         var help = new Label { Text = "CLIは .exe / .js / .mjs を選択できます。npmの.cmdも標準配置なら解決します。\nCLIが未導入の場合は docs/chat-addin.md の導入手順を参照してください。", AutoSize = true, Dock = DockStyle.Fill };
-        grid.Controls.Add(help, 0, 7); grid.SetColumnSpan(help, 3); grid.RowStyles.Add(new(SizeType.Absolute, 60));
+        grid.Controls.Add(help, 0, _fields.Count + 1); grid.SetColumnSpan(help, 3); grid.RowStyles.Add(new(SizeType.Absolute, 60));
         var save = new Button { Text = "保存", AutoSize = true };
         save.Click += (_, _) =>
         {
             try
             {
                 Settings.ProjectDirectory = _fields["project"].Text.Trim(); Settings.CadExecutable = _fields["cad"].Text.Trim(); Settings.NodeExecutable = _fields["node"].Text.Trim();
-                foreach (var provider in Enum.GetValues<AiProvider>()) Settings.Providers[provider].Executable = _fields[provider.ToString()].Text.Trim();
+                foreach (var provider in ChatSettings.AvailableProviders) Settings.Providers[provider].Executable = _fields[provider.ToString()].Text.Trim();
                 Settings.ValidateCad(); Settings.Save(); DialogResult = DialogResult.OK; Close();
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "設定を確認してください", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         };
-        grid.Controls.Add(save, 1, 8); AcceptButton = save;
+        grid.Controls.Add(save, 1, _fields.Count + 2); AcceptButton = save;
         void Add(string key, string label, string value, bool folder)
         {
             var row = _fields.Count + 1;

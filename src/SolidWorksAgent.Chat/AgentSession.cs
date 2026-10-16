@@ -19,6 +19,17 @@ public interface IAgentSession : IAsyncDisposable
 
 public static class AgentSession
 {
+    private static string WindowsCliInstructions(AiProvider provider) => provider == AiProvider.Claude
+        ? """
+          Claude runs with its native auto permission review. Use the Windows CLI directly from PowerShell (& 'C:\path\swagent.exe' args)
+          or Git Bash ('C:/path/swagent.exe' args). Capture stdout/stderr and the exit code; verify actual JSON results.
+          PowerShell may use ConstrainedLanguage: do not use Diagnostics.Process, Add-Type, or change language/security settings.
+          If direct invocation yields no output, use the other available native shell with the same Windows executable; do not use WSL.
+          Respect Claude permission denials; do not bypass them. This pane has no interactive Claude permission handler.
+          If required execution remains denied, report the blocked action and reason, not a pending approval that the pane cannot display.
+          """
+        : "When running a Windows CLI from PowerShell, use Diagnostics.Process with redirected stdout/stderr and WaitForExit if direct invocation returns no output.";
+
     public static IAgentSession Create(ChatSettings settings, int processId) => settings.Provider == AiProvider.Codex
         ? new CodexSession(settings, processId) : new NativeCliSession(settings, processId);
 
@@ -30,7 +41,7 @@ public static class AgentSession
         Target SOLIDWORKS process ID: {processId}
         Read AGENTS.md and relevant project documentation. The CLI --help and docs/api-automation.md describe existing tools.
         Prefer the solidworks_cli tool when available; otherwise invoke the Windows CLI with --solidworks-pid {processId} --json.
-        When running a Windows CLI from PowerShell, use Diagnostics.Process with redirected stdout/stderr and WaitForExit if direct invocation returns no output.
+        {WindowsCliInstructions(settings.Provider)}
         It accepts any existing CLI command and optional stdin, including api search/describe/execute --plan-stdin.
         You also have your native agent tools. Inspect source/docs and use or extend existing tools when the task needs it.
         Decide how to inspect, execute, verify and recover using your own agent workflow. The pane only relays messages and tools.

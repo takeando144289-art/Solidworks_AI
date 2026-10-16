@@ -1,6 +1,6 @@
 # SolidWorks AI Chat (Windows)
 
-Windows x64 SOLIDWORKS task-pane front end for the native **Codex / Claude / Gemini** agents.
+Windows x64 SOLIDWORKS task-pane front end for the native **Codex / Claude** agents.
 The pane forwards the user's text and displays the agent's streamed response. It does
 not interpret JSON operation proposals, require an extra “execute” message, or run a
 custom planning/retry loop. The vendor agent owns tool use, recovery and completion.
@@ -53,6 +53,10 @@ because the native COM host / managed assemblies can remain loaded in its proces
 
 ## AI connections
 
+The provider selector and settings show Codex and Claude only. Legacy Gemini settings
+remain readable; a previously selected Gemini falls back to Codex without discarding
+other saved paths or model settings.
+
 This implementation uses each vendor's **Windows CLI**, not the Codex desktop
 chat or WSL installation, and not an API model renamed to “Codex”. Install and
 authenticate the desired CLI using its official instructions:
@@ -61,8 +65,6 @@ authenticate the desired CLI using its official instructions:
   [non-interactive execution](https://developers.openai.com/codex/noninteractive/).
 - [Claude Code setup](https://code.claude.com/docs/en/setup),
   [CLI flags](https://code.claude.com/docs/en/cli-reference).
-- [Gemini CLI](https://geminicli.com/docs/get-started/installation/),
-  [headless mode](https://geminicli.com/docs/cli/headless/).
 
 Use current CLI versions supporting the flags below. This application does not
 install or sign in to vendor accounts automatically. Service availability and
@@ -77,7 +79,7 @@ Open **設定** to set:
 - Node.js: `node.exe` or its full path when using npm-installed CLIs.
 
 Per-provider model names are editable under **モデル選択**. Empty uses the vendor default.
-Codex uses a persistent app-server thread while the pane is open. Claude/Gemini use
+Codex uses a persistent app-server thread while the pane is open. Claude uses
 native CLI session IDs for subsequent messages. Switching providers keeps their sessions
 separate; the UI transcript is shared visually but another provider does not inherit a
 private vendor session. **新しいチャット** starts fresh sessions. Closing SOLIDWORKS
@@ -132,16 +134,23 @@ requests. Exceptional user-only approvals and missing design inputs still appear
 The project location, CAD executable and host PID are supplied as integration context.
 The normal Codex instructions are preserved; baseInstructions are not replaced.
 
-Claude/Gemini use native stream-json CLI output and native session resume. Their tools,
-plugins and permission settings are no longer disabled by the pane. They invoke the CAD
-CLI using the supplied path/PID. Headless permission support depends on the installed CLI
-and its existing configuration; the pane currently relays interactive native approvals
-for Codex only. Claude/Gemini process stop terminates the agent, not its CAD descendants;
+Claude uses native stream-json CLI output and native session resume with
+`--permission-mode auto`, so Claude's own classifier reviews actions during headless runs.
+This requires a Claude Code version, model and account that support auto mode; explicit
+deny rules and organization policies still apply. The pane does not enable permission bypass
+or change global Claude/Windows/WSL settings. See [Claude permission modes](https://code.claude.com/docs/en/permission-modes).
+Claude invokes the Windows CAD CLI directly through PowerShell or Git Bash using the
+supplied path/PID. Its PowerShell tool may use ConstrainedLanguage, so its integration
+instructions avoid `Diagnostics.Process`/`Add-Type`; a native Git Bash invocation can
+handle missing stdout without relaxing the PowerShell restriction.
+Interactive native approval forwarding is currently available for Codex only. Claude must
+report persistent denials as blocked actions instead of asking users to approve a nonexistent
+pane prompt. Claude process stop terminates the agent, not its CAD descendants;
 wait for any active CAD operation to finish before sending another request.
 
 This uses the vendor's agent runtime; it does not guarantee identical model selection,
 installed plugins, tools or quality to a separate desktop conversation. Codex real-runtime
-checks and Claude/Gemini adapter checks are documented separately below.
+checks and Claude adapter checks are documented separately below.
 
 ## Verification
 
@@ -183,7 +192,7 @@ The UI process is Windows; WSL is only an optional development shell.
   task-pane control after the host's resize event.
 - At that verification the package was `artifacts\chat-conversation`; V6 supersedes it.
 - Windows Codex authentication and a real response were verified with ChatGPT login.
-  Claude/Gemini adapter checks still use fixtures.
+  Claude adapter checks still use fixtures.
 - V3 assemblies and COM identity allow replacing the old loaded chat pane without
   restarting SOLIDWORKS or closing CAD documents. Disable/unregister the old package
   when migrating; never replace files while their assemblies are loaded.
@@ -213,7 +222,7 @@ Discovery starts no conversation or inference turn and closes its temporary CLI 
 Selections apply to the next turn; returning to the default explicitly resolves the
 Windows Codex config so the conversation does not retain the previous model override.
 The catalog can be cached by Codex; inclusion is not a guarantee of account entitlement.
-Claude/Gemini list discovery is not implemented; their picker explains this and retains
+Claude list discovery is not implemented; its picker explains this and retains
 default/manual selection. No API key or WSL configuration change is required.
 
 Output versioning follows `AGENTS.md`: use one version/path during a request, with
@@ -306,8 +315,12 @@ identities so it can be loaded while an older pane is resident.
 The V6 test suite covers direct input, native session reuse, streamed text, steering,
 user-input/approval forwarding, cancellation and a tool error followed by a tool success.
 Native Codex integration is exercised with synthetic tool data, not the user's CAD model.
-Claude/Gemini native adapters need the corresponding installed/authenticated Windows CLI;
-real CAD execution through those vendors has not been verified.
+The Claude native adapter needs the installed/authenticated Windows CLI;
+read-only native CLI help/connection was verified on 2026-10-16 with Claude Code 2.1.301
+and SOLIDWORKS 2026. The Windows PowerShell call returned no output; Claude retried
+through Git Bash and obtained exit code 0 and `connected=true` without manual approval.
+This verifies the same native adapter used by the pane; CAD creation/editing through
+Claude has not been tested.
 
 When copying a portable Codex runtime, copy its matching helper executables too:
 
@@ -399,9 +412,8 @@ the attachments and draft remain available for retry.
 
 Codex receives PNG, JPEG and WebP files through native `localImage` inputs alongside
 the user message. Other files (including PDFs, CAD, text, BMP and TIFF) are provided
-as local references for the agent's native tools to read, render or inspect. Claude
-and Gemini receive the reference paths through their existing CLI prompts and use
-their own file tools; those providers' actual file-reading capability depends on
+as local references for the agent's native tools to read, render or inspect. Claude receives the reference paths through its existing CLI prompts and uses
+its own file tools; its actual file-reading capability depends on
 the installed CLI and model. No new API key is required. A drawing still needs enough
 information to determine dimensions; the agent is instructed to ask about missing
 sizes rather than claim it inspected unavailable contents.

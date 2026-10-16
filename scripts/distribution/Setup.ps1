@@ -134,7 +134,7 @@ try {
         if (-not (Test-Path -LiteralPath $settings.providers.Codex.executable -PathType Leaf)) { $settings.providers.Codex.executable = $codex }
     } else {
         $settings = [ordered]@{ projectDirectory=$projectRoot; cadExecutable=(Join-Path $machineRoot 'cli\swagent.exe'); nodeExecutable=$(if ($node) { $node } else { 'node.exe' }); provider=0; providers=[ordered]@{
-            Codex=@{executable=$codex;model=''}; Claude=@{executable='claude.exe';model=''}; Gemini=@{executable='gemini.exe';model=''} } }
+            Codex=@{executable=$codex;model=''}; Claude=@{executable='claude.exe';model=''} } }
     }
     $json = $settings | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($settingsPath + '.tmp', $json, (New-Object Text.UTF8Encoding($false)))

@@ -48,7 +48,7 @@ try {
     try {
         $key.SetValue('',0,[Microsoft.Win32.RegistryValueKind]::DWord)
         $key.SetValue('Title','SolidWorks AI Chat')
-        $key.SetValue('Description','Chat with Codex, Claude or Gemini using SolidWorksAgent.')
+        $key.SetValue('Description','Chat with Codex or Claude using SolidWorksAgent.')
     } finally { $key.Dispose() }
     exit 0
 } catch { Write-Error $_ -ErrorAction Continue; Read-Host 'Press Enter to close'; exit 1 }

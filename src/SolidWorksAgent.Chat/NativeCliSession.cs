@@ -15,7 +15,7 @@ public sealed class NativeCliSession(ChatSettings settings, int processId) : IAg
     {
         List<string> args = provider switch
         {
-            AiProvider.Claude => ["-p", "--verbose", "--output-format", "stream-json"],
+            AiProvider.Claude => ["-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"],
             AiProvider.Gemini => ["--prompt", "Read the user request from standard input.", "--output-format", "stream-json"],
             _ => throw new ArgumentException("Use Codex app-server for Codex.")
         };
