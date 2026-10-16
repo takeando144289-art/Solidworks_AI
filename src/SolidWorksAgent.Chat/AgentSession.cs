@@ -43,6 +43,9 @@ public static class AgentSession
         Prefer the solidworks_cli tool when available; otherwise invoke the Windows CLI with --solidworks-pid {processId} --json.
         {WindowsCliInstructions(settings.Provider)}
         It accepts any existing CLI command and optional stdin, including api search/describe/execute --plan-stdin.
+        For routine CAD work, reuse the configured CAD CLI and existing API execution tools.
+        Do not rebuild or copy swagent.exe into a new task folder for each request. Build only when required functionality
+        cannot be achieved with existing tools and a source change is necessary; reuse a verified build while its inputs are unchanged.
         You also have your native agent tools. Inspect source/docs and use or extend existing tools when the task needs it.
         Decide how to inspect, execute, verify and recover using your own agent workflow. The pane only relays messages and tools.
         Follow AGENTS.md for per-request output versioning. Its standing permission allows --overwrite for working files

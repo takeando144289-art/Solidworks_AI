@@ -445,3 +445,18 @@ selected by SOLIDWORKS for the display scale through
 [`CreateTaskpaneView3`](https://help.solidworks.com/2025/English/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISldWorks~CreateTaskpaneView3.html).
 Run `scripts/Build-TaskPaneIcons.ps1` on Windows after replacing the source artwork.
 The chat remains accessible with the default icon if the image files are missing.
+
+### Repeated antivirus inspection
+
+Reuse the configured CLI for ordinary CAD work, including `api search/describe/execute`,
+instead of publishing a new `swagent.exe` for every task. Rebuild only for necessary
+application changes, and reuse the verified build while its inputs are unchanged.
+On 2026-10-16, the eight most recent matching Norton history entries showed separate
+CLI builds with different hashes and `SnxClean` results. This is evidence of repeated
+inspection, not a malware finding in those entries; it does not certify future binaries.
+Reusing builds can reduce newly encountered files but cannot guarantee that scans stop.
+Do not disable antivirus protection or add blanket folder exclusions as part of app setup.
+For public distribution, consider signing releases with a trusted code-signing certificate;
+a signature identifies the publisher but does not exempt the app from scanning.
+For actual detections, record the product, detection name and file hash, and follow the
+[vendor review procedure](https://support.norton.com/sp/en/us/home/current/solutions/kb20090410134005EN).
